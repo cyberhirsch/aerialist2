@@ -32,8 +32,11 @@ const hexVal = (b: number): number => {
 
 export class Lexer {
   private pos = 0
+  private readonly data: Uint8Array
 
-  constructor(private readonly data: Uint8Array) {}
+  constructor(data: Uint8Array) {
+    this.data = data
+  }
 
   get offset(): number {
     return this.pos

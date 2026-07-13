@@ -60,11 +60,9 @@ export class ParsedFont {
   private readonly simpleEncoding: Map<number, string> | null
   private readonly widths: Map<number, number>
   private readonly defaultWidth: number
-  private readonly raw: RawFontData
   private reverse: Map<string, number> | null = null
 
   constructor(raw: RawFontData) {
-    this.raw = raw
     this.resourceName = raw.resourceName
     this.baseFont = raw.baseFont
     this.subtype = raw.subtype

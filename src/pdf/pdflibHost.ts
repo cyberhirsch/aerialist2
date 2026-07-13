@@ -40,7 +40,11 @@ export interface HostPage {
 }
 
 export class PdfHost {
-  private constructor(readonly doc: PDFDocument) {}
+  readonly doc: PDFDocument
+
+  private constructor(doc: PDFDocument) {
+    this.doc = doc
+  }
 
   static async load(bytes: Uint8Array): Promise<PdfHost> {
     const doc = await PDFDocument.load(bytes, {
