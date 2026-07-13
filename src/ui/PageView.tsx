@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Rect, Word } from '../model/document'
+import type { Block, Line, Rect, Word } from '../model/document'
 import { rectContains } from '../model/document'
-import { useApp } from './store'
+import { useApp, type EditMode } from './store'
 
 /** CSS position of a PDF-user-space rect at the current zoom. */
 function cssRect(bbox: Rect, pageHeight: number, zoom: number) {
@@ -13,11 +13,25 @@ function cssRect(bbox: Rect, pageHeight: number, zoom: number) {
   }
 }
 
+interface Hit {
+  block: Block
+  line: Line
+  word: Word
+}
+
+function hitBBox(hit: Hit, mode: EditMode): Rect {
+  return mode === 'word' ? hit.word.bbox : mode === 'line' ? hit.line.bbox : hit.block.bbox
+}
+
+const lineText = (line: Line) => line.words.map((w) => w.text).join(' ')
+
 export function PageView() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const { model, renderer, pageIndex, zoom, revision, editing, busy, startEdit, cancelEdit, applyEdit } =
-    useApp()
-  const [hovered, setHovered] = useState<Word | null>(null)
+  const {
+    model, renderer, pageIndex, zoom, revision, editing, editMode, busy,
+    startEdit, cancelEdit, applyEdit,
+  } = useApp()
+  const [hovered, setHovered] = useState<Hit | null>(null)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
 
   const page = model?.pages[pageIndex] ?? null
@@ -35,7 +49,7 @@ export function PageView() {
   }, [model, renderer, pageIndex, zoom, revision])
 
   const hitTest = useCallback(
-    (e: React.MouseEvent): Word | null => {
+    (e: React.MouseEvent): Hit | null => {
       if (!page) return null
       const rect = e.currentTarget.getBoundingClientRect()
       const px = (e.clientX - rect.left) / zoom
@@ -44,13 +58,61 @@ export function PageView() {
         if (!rectContains(block.bbox, px, py)) continue
         for (const line of block.lines) {
           for (const word of line.words) {
-            if (rectContains(word.bbox, px, py)) return word
+            if (rectContains(word.bbox, px, py)) return { block, line, word }
           }
         }
       }
       return null
     },
     [page, zoom],
+  )
+
+  const beginEdit = useCallback(
+    (hit: Hit) => {
+      if (editMode === 'word') {
+        const { word } = hit
+        startEdit({
+          target: { glyphs: word.glyphs, fontRes: word.fontRes, fontSize: word.fontSize },
+          initial: word.text,
+          bbox: word.bbox,
+          multiline: false,
+        })
+        return
+      }
+      if (editMode === 'line') {
+        const { line } = hit
+        const first = line.words[0]
+        startEdit({
+          target: {
+            glyphs: line.words.flatMap((w) => w.glyphs),
+            fontRes: first.fontRes,
+            fontSize: first.fontSize,
+          },
+          initial: lineText(line),
+          bbox: line.bbox,
+          multiline: false,
+        })
+        return
+      }
+      const { block } = hit
+      const first = block.lines[0].words[0]
+      const leading =
+        block.lines.length >= 2
+          ? Math.abs(block.lines[0].baseline - block.lines[1].baseline)
+          : first.fontSize * 1.25
+      startEdit({
+        target: {
+          glyphs: block.lines.flatMap((l) => l.words.flatMap((w) => w.glyphs)),
+          fontRes: first.fontRes,
+          fontSize: first.fontSize,
+        },
+        initial: block.lines.map(lineText).join(' '),
+        bbox: block.bbox,
+        multiline: true,
+        layout: { maxWidth: block.bbox.w + 2, leading },
+      })
+    },
+    [editMode, startEdit],
   )
 
   if (!model || !page) {
@@ -69,8 +131,9 @@ export function PageView() {
     )
   }
 
-  const hoverCss = hovered && !editing ? cssRect(hovered.bbox, page.height, zoom) : null
-  const editCss = editing ? cssRect(editing.word.bbox, page.height, zoom) : null
+  const hoverCss =
+    hovered && !editing ? cssRect(hitBBox(hovered, editMode), page.height, zoom) : null
+  const editCss = editing ? cssRect(editing.bbox, page.height, zoom) : null
 
   return (
     <div className="flex-1 overflow-auto p-6">
@@ -83,8 +146,8 @@ export function PageView() {
         onMouseLeave={() => setHovered(null)}
         onClick={(e) => {
           if (busy) return
-          const word = hitTest(e)
-          if (word) startEdit(word)
+          const hit = hitTest(e)
+          if (hit) beginEdit(hit)
         }}
       >
         <canvas ref={canvasRef} className="block" />
@@ -93,16 +156,16 @@ export function PageView() {
           <div
             className="pointer-events-none absolute border border-dashed border-ink-4 bg-ink-7/10"
             style={hoverCss}
-            title={hovered?.text}
           />
         )}
 
         {editing && editCss && (
-          <WordEditor
-            key={`${editing.word.baseline}:${editing.word.bbox.x}`}
-            initial={editing.word.text}
+          <SpanEditor
+            key={`${editing.bbox.x}:${editing.bbox.y}:${editMode}`}
+            initial={editing.initial}
             css={editCss}
-            fontSize={editing.word.fontSize * zoom}
+            fontSize={Math.min(editing.target.fontSize * zoom, 24)}
+            multiline={editing.multiline}
             onCancel={cancelEdit}
             onApply={(text) => void applyEdit(text)}
           />
@@ -112,33 +175,61 @@ export function PageView() {
   )
 }
 
-function WordEditor({ initial, css, fontSize, onApply, onCancel }: {
+function SpanEditor({ initial, css, fontSize, multiline, onApply, onCancel }: {
   initial: string
   css: { left: number; top: number; width: number; height: number }
   fontSize: number
+  multiline: boolean
   onApply: (text: string) => void
   onCancel: () => void
 }) {
   const [value, setValue] = useState(initial)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const ref = useRef<HTMLInputElement & HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    inputRef.current?.focus()
-    inputRef.current?.select()
+    ref.current?.focus()
+    ref.current?.select()
   }, [])
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      onApply(value)
+    } else if (e.key === 'Escape') {
+      onCancel()
+    }
+  }
+
+  const common = {
+    ref,
+    value,
+    spellCheck: false,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setValue(e.target.value),
+    onKeyDown,
+    onBlur: onCancel,
+    className:
+      'absolute z-10 resize-none border border-ink-6 bg-ink-0 px-0.5 text-ink-7 outline-none',
+  }
+
+  if (multiline) {
+    return (
+      <textarea
+        {...common}
+        style={{
+          left: css.left - 3,
+          top: css.top - 3,
+          width: Math.max(css.width + 8, 160),
+          height: Math.max(css.height + 8, fontSize * 2.5),
+          fontSize,
+          lineHeight: 1.35,
+        }}
+      />
+    )
+  }
   return (
     <input
-      ref={inputRef}
-      value={value}
-      spellCheck={false}
-      onChange={(e) => setValue(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') onApply(value)
-        else if (e.key === 'Escape') onCancel()
-      }}
-      onBlur={onCancel}
-      className="absolute z-10 border border-ink-6 bg-ink-0 px-0.5 text-ink-7 outline-none"
+      {...common}
       style={{
         left: css.left - 3,
         top: css.top - 3,

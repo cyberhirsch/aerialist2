@@ -49,15 +49,23 @@ export interface StringEdit {
   replacement: Uint8Array
 }
 
+/** Clone an operation with edits applied to its string operands. */
+export function applyEditsToOperation(
+  op: Operation,
+  edits: StringEdit[],
+): Operation {
+  const operands = op.operands.map((v, operandIndex) =>
+    cloneWithEdits(v, operandIndex, op, edits),
+  )
+  return { ...op, operands }
+}
+
 /**
  * Clone an operation with edits applied to its string operands and
  * serialize it, producing a splice for its source byte range.
  */
 export function rewriteOperation(op: Operation, edits: StringEdit[]): Splice {
-  const operands = op.operands.map((v, operandIndex) =>
-    cloneWithEdits(v, operandIndex, op, edits),
-  )
-  const text = serializeOperation({ ...op, operands })
+  const text = serializeOperation(applyEditsToOperation(op, edits))
   return { start: op.start, end: op.end, bytes: toBytes(text) }
 }
 

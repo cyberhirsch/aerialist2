@@ -17,10 +17,14 @@ function Key({ label, onClick, disabled }: {
   )
 }
 
+const MODES = ['word', 'line', 'block'] as const
+
 export function Toolbar() {
   const fileInput = useRef<HTMLInputElement>(null)
-  const { fileName, model, pageIndex, zoom, busy, openFile, setPage, setZoom, exportPdf } =
-    useApp()
+  const {
+    fileName, model, pageIndex, zoom, busy, editMode,
+    openFile, setPage, setZoom, setEditMode, exportPdf,
+  } = useApp()
 
   const onPick = async (files: FileList | null) => {
     const file = files?.[0]
@@ -36,6 +40,26 @@ export function Toolbar() {
 
       <Key label="[ open ]" onClick={() => fileInput.current?.click()} disabled={busy} />
       <Key label="[ export ]" onClick={() => void exportPdf()} disabled={!model || busy} />
+
+      <span className="text-ink-3">│</span>
+      <span className="flex items-center text-ink-5">
+        {MODES.map((m) => (
+          <button
+            key={m}
+            onClick={() => setEditMode(m)}
+            disabled={!model}
+            className={
+              'px-1.5 disabled:opacity-40 ' +
+              (editMode === m
+                ? 'bg-ink-2 text-ink-7'
+                : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+            }
+            title={`edit granularity: ${m === 'block' ? 'paragraph' : m}`}
+          >
+            {m === 'block' ? 'para' : m}
+          </button>
+        ))}
+      </span>
 
       <span className="flex-1 truncate text-center text-ink-4">
         {fileName ?? '── no document ──'}

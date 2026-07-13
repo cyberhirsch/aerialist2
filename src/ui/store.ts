@@ -4,15 +4,23 @@
  */
 
 import { create } from 'zustand'
-import type { DocumentModel, Word } from '../model/document'
+import type { DocumentModel, Rect } from '../model/document'
 import { loadDocumentModel } from '../model/buildModel'
-import { replaceWordText } from '../model/editText'
+import { replaceSpanText, type LayoutOpts, type SpanTarget } from '../model/editText'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
 
+export type EditMode = 'word' | 'line' | 'block'
+
 export interface EditingState {
-  word: Word
+  target: SpanTarget
+  /** Text prefilled in the editor. */
+  initial: string
+  bbox: Rect
   pageIndex: number
+  /** Paragraph edits use a textarea and reflow on apply. */
+  multiline: boolean
+  layout?: LayoutOpts
 }
 
 interface AppState {
@@ -25,12 +33,14 @@ interface AppState {
   revision: number
   status: string
   editing: EditingState | null
+  editMode: EditMode
   busy: boolean
 
   openFile(name: string, bytes: Uint8Array): Promise<void>
   setPage(index: number): void
   setZoom(zoom: number): void
-  startEdit(word: Word): void
+  setEditMode(mode: EditMode): void
+  startEdit(editing: Omit<EditingState, 'pageIndex'>): void
   cancelEdit(): void
   applyEdit(newText: string): Promise<void>
   exportPdf(): Promise<void>
@@ -47,6 +57,7 @@ export const useApp = create<AppState>((set, get) => ({
   revision: 0,
   status: 'open a pdf to begin',
   editing: null,
+  editMode: 'word',
   busy: false,
 
   async openFile(name, bytes) {
@@ -88,8 +99,12 @@ export const useApp = create<AppState>((set, get) => ({
     set({ zoom: Math.max(0.25, Math.min(4, zoom)), editing: null })
   },
 
-  startEdit(word) {
-    set({ editing: { word, pageIndex: get().pageIndex } })
+  setEditMode(mode) {
+    set({ editMode: mode, editing: null })
+  },
+
+  startEdit(editing) {
+    set({ editing: { ...editing, pageIndex: get().pageIndex } })
   },
 
   cancelEdit() {
@@ -99,18 +114,20 @@ export const useApp = create<AppState>((set, get) => ({
   async applyEdit(newText) {
     const { host, model, editing, renderer } = get()
     if (!host || !model || !editing) return
-    if (newText === editing.word.text || newText.length === 0) {
+    const trimmed = newText.replace(/\s+/g, ' ').trim()
+    if (trimmed === editing.initial || trimmed.length === 0) {
       set({ editing: null })
       return
     }
     set({ busy: true, status: 'rewriting content stream …' })
     try {
-      const outcome = await replaceWordText(
+      const outcome = await replaceSpanText(
         host,
         model,
         editing.pageIndex,
-        editing.word,
-        newText,
+        editing.target,
+        trimmed,
+        editing.layout,
       )
       if (!outcome.ok) {
         set({ busy: false, editing: null, status: `edit failed: ${outcome.reason}` })
@@ -118,13 +135,19 @@ export const useApp = create<AppState>((set, get) => ({
       }
       const bytes = await host.save()
       await renderer.load(bytes)
+      const summary =
+        editing.initial.length > 24
+          ? `${editing.initial.slice(0, 24)}…`
+          : editing.initial
+      const notes = [
+        outcome.lineCount > 1 ? `rewrapped to ${outcome.lineCount} lines` : null,
+        outcome.usedFallbackFont ? 'replacement font embedded' : null,
+      ].filter(Boolean)
       set((s) => ({
         busy: false,
         editing: null,
         revision: s.revision + 1,
-        status: outcome.usedFallbackFont
-          ? `"${editing.word.text}" → "${newText}" (replacement font embedded — original font lacked the glyphs)`
-          : `"${editing.word.text}" → "${newText}" — content stream rewritten`,
+        status: `"${summary}" replaced — content stream rewritten${notes.length ? ` (${notes.join(', ')})` : ''}`,
       }))
     } catch (err) {
       set({ busy: false, editing: null, status: `error: ${(err as Error).message}` })
