@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* ── Aerialist2 greyscale TUI theme ─────────────────────────────
+   Monospace everywhere, pure greys, no color accents. */
+
+@theme {
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, "SF Mono",
+    Menlo, monospace;
+  --font-sans: var(--font-mono);
+
+  /* grey scale, dark-terminal first */
+  --color-ink-0: #0c0c0c;   /* app background */
+  --color-ink-1: #161616;   /* panel background */
+  --color-ink-2: #222222;   /* raised / hover */
+  --color-ink-3: #3a3a3a;   /* borders */
+  --color-ink-4: #6e6e6e;   /* muted text */
+  --color-ink-5: #a8a8a8;   /* secondary text */
+  --color-ink-6: #d4d4d4;   /* primary text */
+  --color-ink-7: #f2f2f2;   /* emphasis text */
+
+  --radius: 0px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-mono);
+  background: var(--color-ink-0);
+  color: var(--color-ink-6);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-ink-6);
+  color: var(--color-ink-0);
+}
+
+/* thin grey scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-3) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-ink-3);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
