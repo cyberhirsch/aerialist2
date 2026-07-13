@@ -9,6 +9,7 @@ import {
   PDFArray,
   PDFDict,
   PDFDocument,
+  PDFFont,
   PDFHexString,
   PDFName,
   PDFNumber,
@@ -16,9 +17,19 @@ import {
   PDFRef,
   PDFStream,
   PDFString,
+  StandardFonts,
   decodePDFRawStream,
 } from 'pdf-lib'
 import type { RawFontData } from '../engine/fonts'
+
+/** A replacement font embedded for text the original font can't encode. */
+export interface FallbackFont {
+  resourceName: string
+  /** Returns null when the replacement font can't encode the text either. */
+  encode(text: string): Uint8Array | null
+  /** Width of text in 1/1000 em units. */
+  measure(text: string): number
+}
 
 export interface HostPage {
   index: number
@@ -94,6 +105,51 @@ export class PdfHost {
 
   async save(): Promise<Uint8Array> {
     return this.doc.save({ useObjectStreams: false })
+  }
+
+  /* ── fallback font ─────────────────────────────────────────── */
+
+  private fallbacks = new Map<number, FallbackFont>()
+  private fallbackFont: PDFFont | null = null
+
+  /**
+   * Embed a standard replacement font (once per document) and register
+   * it in the page's font resources under a fresh name.
+   */
+  async embedFallbackFont(pageIndex: number): Promise<FallbackFont> {
+    const cached = this.fallbacks.get(pageIndex)
+    if (cached) return cached
+
+    if (!this.fallbackFont) {
+      this.fallbackFont = await this.doc.embedFont(StandardFonts.Helvetica)
+      // flush the font dict into the context now, not at save time, so
+      // the rebuilt page model can resolve the new resource immediately
+      await this.fallbackFont.embed()
+    }
+    const font = this.fallbackFont
+
+    const existing = new Set(this.pageFonts(pageIndex).map((f) => f.resourceName))
+    let resourceName = 'A2FB'
+    for (let n = 1; existing.has(resourceName); n++) resourceName = `A2FB${n}`
+
+    const page = this.doc.getPage(pageIndex)
+    page.node.setFontDictionary(PDFName.of(resourceName), font.ref)
+
+    const fallback: FallbackFont = {
+      resourceName,
+      encode: (text) => {
+        try {
+          return font.encodeText(text).asBytes()
+        } catch {
+          // TODO(font-manager): bundle a full-Unicode TTF via fontkit for
+          // characters outside the standard font's encoding
+          return null
+        }
+      },
+      measure: (text) => font.widthOfTextAtSize(text, 1000),
+    }
+    this.fallbacks.set(pageIndex, fallback)
+    return fallback
   }
 
   /* ── font extraction ───────────────────────────────────────── */
