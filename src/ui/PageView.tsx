@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { groupCells } from '../engine/detect'
 import type { Block, Line, Rect, Word } from '../model/document'
-import { rectContains } from '../model/document'
+import { rectContains, unionRect } from '../model/document'
 import { useApp, type EditMode } from './store'
 
 /** CSS position of a PDF-user-space rect at the current zoom. */
@@ -19,8 +20,39 @@ interface Hit {
   word: Word
 }
 
-function hitBBox(hit: Hit, mode: EditMode): Rect {
-  return mode === 'word' ? hit.word.bbox : mode === 'line' ? hit.line.bbox : hit.block.bbox
+/** What a click would actually select, after auto-mode resolution. */
+type Granularity = 'word' | 'cell' | 'line' | 'block'
+
+function resolveGranularity(hit: Hit, mode: EditMode): Granularity {
+  if (mode !== 'auto') return mode
+  switch (hit.block.kind) {
+    case 'table':
+      return 'cell'
+    case 'paragraph':
+      return 'block'
+    default:
+      return 'line'
+  }
+}
+
+/** The words a granularity covers; cell = the clicked word's column group. */
+function selectionWords(hit: Hit, granularity: Granularity): Word[] {
+  switch (granularity) {
+    case 'word':
+      return [hit.word]
+    case 'cell':
+      return groupCells(hit.line).find((c) => c.includes(hit.word)) ?? [hit.word]
+    case 'line':
+      return hit.line.words
+    case 'block':
+      return hit.block.lines.flatMap((l) => l.words)
+  }
+}
+
+function wordsBBox(words: Word[]): Rect {
+  let bbox = { ...words[0].bbox }
+  for (const w of words.slice(1)) bbox = unionRect(bbox, w.bbox)
+  return bbox
 }
 
 const lineText = (line: Line) => line.words.map((w) => w.text).join(' ')
@@ -69,47 +101,39 @@ export function PageView() {
 
   const beginEdit = useCallback(
     (hit: Hit) => {
-      if (editMode === 'word') {
-        const { word } = hit
-        startEdit({
-          target: { glyphs: word.glyphs, fontRes: word.fontRes, fontSize: word.fontSize },
-          initial: word.text,
-          bbox: word.bbox,
-          multiline: false,
-        })
-        return
-      }
-      if (editMode === 'line') {
-        const { line } = hit
-        const first = line.words[0]
+      const granularity = resolveGranularity(hit, editMode)
+      const words = selectionWords(hit, granularity)
+      const first = words[0]
+
+      if (granularity === 'block') {
+        const { block } = hit
+        const leading =
+          block.lines.length >= 2
+            ? Math.abs(block.lines[0].baseline - block.lines[1].baseline)
+            : first.fontSize * 1.25
         startEdit({
           target: {
-            glyphs: line.words.flatMap((w) => w.glyphs),
+            glyphs: words.flatMap((w) => w.glyphs),
             fontRes: first.fontRes,
             fontSize: first.fontSize,
           },
-          initial: lineText(line),
-          bbox: line.bbox,
-          multiline: false,
+          initial: block.lines.map(lineText).join(' '),
+          bbox: block.bbox,
+          multiline: true,
+          layout: { maxWidth: block.bbox.w + 2, leading },
         })
         return
       }
-      const { block } = hit
-      const first = block.lines[0].words[0]
-      const leading =
-        block.lines.length >= 2
-          ? Math.abs(block.lines[0].baseline - block.lines[1].baseline)
-          : first.fontSize * 1.25
+
       startEdit({
         target: {
-          glyphs: block.lines.flatMap((l) => l.words.flatMap((w) => w.glyphs)),
+          glyphs: words.flatMap((w) => w.glyphs),
           fontRes: first.fontRes,
           fontSize: first.fontSize,
         },
-        initial: block.lines.map(lineText).join(' '),
-        bbox: block.bbox,
-        multiline: true,
-        layout: { maxWidth: block.bbox.w + 2, leading },
+        initial: words.map((w) => w.text).join(' '),
+        bbox: granularity === 'line' ? hit.line.bbox : wordsBBox(words),
+        multiline: false,
       })
     },
     [editMode, startEdit],
@@ -131,8 +155,19 @@ export function PageView() {
     )
   }
 
-  const hoverCss =
-    hovered && !editing ? cssRect(hitBBox(hovered, editMode), page.height, zoom) : null
+  let hoverCss: ReturnType<typeof cssRect> | null = null
+  let hoverTag: string | null = null
+  if (hovered && !editing) {
+    const granularity = resolveGranularity(hovered, editMode)
+    const bbox =
+      granularity === 'block'
+        ? hovered.block.bbox
+        : granularity === 'line'
+          ? hovered.line.bbox
+          : wordsBBox(selectionWords(hovered, granularity))
+    hoverCss = cssRect(bbox, page.height, zoom)
+    hoverTag = editMode === 'auto' ? (granularity === 'block' ? 'para' : granularity) : null
+  }
   const editCss = editing ? cssRect(editing.bbox, page.height, zoom) : null
 
   return (
@@ -156,7 +191,13 @@ export function PageView() {
           <div
             className="pointer-events-none absolute border border-dashed border-ink-4 bg-ink-7/10"
             style={hoverCss}
-          />
+          >
+            {hoverTag && (
+              <span className="absolute -top-4 left-0 bg-ink-1 px-1 text-[10px] leading-4 text-ink-5">
+                {hoverTag}
+              </span>
+            )}
+          </div>
         )}
 
         {editing && editCss && (

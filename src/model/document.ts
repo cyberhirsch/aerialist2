@@ -54,9 +54,20 @@ export interface Line {
   baseline: number
 }
 
+/**
+ * How a block's lines relate to each other:
+ * - 'paragraph': flowing prose (each line wrapped because the next word
+ *   wouldn't fit) — safe to reflow as one text
+ * - 'table': columnar layout (multiple lines with wide aligned gaps) —
+ *   only cell/word edits are safe
+ * - 'lines': independent lines (addresses, headings, list items)
+ */
+export type BlockKind = 'paragraph' | 'table' | 'lines'
+
 export interface Block {
   lines: Line[]
   bbox: Rect
+  kind: BlockKind
 }
 
 export interface PageModel {

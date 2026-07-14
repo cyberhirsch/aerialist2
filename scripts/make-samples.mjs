@@ -23,11 +23,11 @@ await mkdir(outDir, { recursive: true })
   page.drawText('Dynamite      10    12.50', { x: 72, y: 528, size: 12, font: courier })
   page.drawText('Total due: 323.00', { x: 72, y: 490, size: 14, font: bold })
   page.drawText(
-    'Payment is due within 30 days of the invoice date. Late payments',
+    'Payment is due within 30 days of the invoice date and late payments are',
     { x: 72, y: 440, size: 11, font: helvetica },
   )
   page.drawText(
-    'are subject to a 2% monthly service charge. Thank you for your business.',
+    'subject to a 2% monthly service charge. Thank you for your business.',
     { x: 72, y: 425, size: 11, font: helvetica },
   )
   page.drawLine({

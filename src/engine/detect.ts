@@ -2,8 +2,11 @@
  * Grouping heuristics: glyphs → words → lines → blocks.
  */
 
-import type { Block, Glyph, Line, Rect, Word } from '../model/document'
+import type { Block, BlockKind, Glyph, Line, Rect, Word } from '../model/document'
 import { unionRect } from '../model/document'
+
+/** Inter-word gaps at least this many ems apart read as column gaps. */
+const COLUMN_GAP_EMS = 1.5
 
 export function detectWords(glyphs: Glyph[]): Word[] {
   const words: Word[] = []
@@ -87,7 +90,7 @@ export function detectBlocks(lines: Line[]): Block[] {
     if (current.length) {
       let bbox = { ...current[0].bbox }
       for (const l of current.slice(1)) bbox = unionRect(bbox, l.bbox)
-      blocks.push({ lines: current, bbox })
+      blocks.push({ lines: current, bbox, kind: classifyBlock(current) })
       current = []
     }
   }
@@ -109,6 +112,62 @@ export function detectBlocks(lines: Line[]): Block[] {
   }
   flush()
   return blocks
+}
+
+/* ── block classification ────────────────────────────────────── */
+
+function columnGaps(line: Line): number {
+  let count = 0
+  for (let i = 1; i < line.words.length; i++) {
+    const prev = line.words[i - 1]
+    const gap = line.words[i].bbox.x - (prev.bbox.x + prev.bbox.w)
+    if (gap >= COLUMN_GAP_EMS * prev.fontSize) count++
+  }
+  return count
+}
+
+export function classifyBlock(lines: Line[]): BlockKind {
+  if (lines.length < 2) return 'lines'
+
+  // columnar: several lines carry wide gaps between word groups
+  const gappedLines = lines.filter((l) => columnGaps(l) > 0).length
+  if (gappedLines >= 2) return 'table'
+
+  // prose: every line break is forced — the next line's first word
+  // would not have fit on the line above
+  const maxW = Math.max(...lines.map((l) => l.bbox.w))
+  for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i]
+    const nextWord = lines[i + 1].words[0]
+    if (!nextWord) continue
+    const spaceW = 0.25 * nextWord.fontSize
+    if (line.bbox.w + spaceW + nextWord.bbox.w <= maxW + 2) {
+      return 'lines' // the break was intentional, not a wrap
+    }
+  }
+  return 'paragraph'
+}
+
+/**
+ * Split a line's words into cells at column gaps. Prose lines come
+ * back as a single cell.
+ */
+export function groupCells(line: Line): Word[][] {
+  const cells: Word[][] = []
+  let current: Word[] = []
+  for (const word of line.words) {
+    const prev = current[current.length - 1]
+    if (prev) {
+      const gap = word.bbox.x - (prev.bbox.x + prev.bbox.w)
+      if (gap >= COLUMN_GAP_EMS * prev.fontSize) {
+        cells.push(current)
+        current = []
+      }
+    }
+    current.push(word)
+  }
+  if (current.length) cells.push(current)
+  return cells
 }
 
 export function buildBlocks(glyphs: Glyph[]): Block[] {

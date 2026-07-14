@@ -17,7 +17,7 @@ function Key({ label, onClick, disabled }: {
   )
 }
 
-const MODES = ['word', 'line', 'block'] as const
+const MODES = ['auto', 'word', 'line', 'block'] as const
 
 export function Toolbar() {
   const fileInput = useRef<HTMLInputElement>(null)
@@ -54,7 +54,11 @@ export function Toolbar() {
                 ? 'bg-ink-2 text-ink-7'
                 : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
             }
-            title={`edit granularity: ${m === 'block' ? 'paragraph' : m}`}
+            title={
+              m === 'auto'
+                ? 'auto: paragraphs reflow, tables edit per cell, other text per line'
+                : `edit granularity: ${m === 'block' ? 'paragraph' : m}`
+            }
           >
             {m === 'block' ? 'para' : m}
           </button>

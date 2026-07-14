@@ -10,7 +10,7 @@ import { replaceSpanText, type LayoutOpts, type SpanTarget } from '../model/edit
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
 
-export type EditMode = 'word' | 'line' | 'block'
+export type EditMode = 'auto' | 'word' | 'line' | 'block'
 
 export interface EditingState {
   target: SpanTarget
@@ -57,7 +57,7 @@ export const useApp = create<AppState>((set, get) => ({
   revision: 0,
   status: 'open a pdf to begin',
   editing: null,
-  editMode: 'word',
+  editMode: 'auto',
   busy: false,
 
   async openFile(name, bytes) {
