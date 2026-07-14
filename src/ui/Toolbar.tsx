@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { useApp } from './store'
+import { defaultPaneView, useApp } from './store'
 
 function Key({ label, onClick, disabled }: {
   label: string
@@ -22,15 +22,20 @@ const MODES = ['auto', 'word', 'line', 'block'] as const
 export function Toolbar() {
   const fileInput = useRef<HTMLInputElement>(null)
   const {
-    fileName, model, pageIndex, zoom, busy, editMode, history, historyIndex,
-    openFile, setPage, setZoom, setEditMode, exportPdf, undo, redo, toggleHelp,
+    fileName, model, busy, editMode, history, historyIndex, paneViews,
+    requestOpen, setPage, setZoom, setEditMode, exportPdf, undo, redo,
+    toggleHelp, targetEditorPaneId,
   } = useApp()
+
+  const editorId = targetEditorPaneId()
+  const view = editorId ? (paneViews[editorId] ?? defaultPaneView()) : null
+  const navDisabled = !model || !editorId
 
   const onPick = async (files: FileList | null) => {
     const file = files?.[0]
     if (!file) return
     const bytes = new Uint8Array(await file.arrayBuffer())
-    await openFile(file.name, bytes)
+    await requestOpen(file.name, bytes)
   }
 
   return (
@@ -76,21 +81,35 @@ export function Toolbar() {
       </span>
 
       <span className="flex items-center gap-1 text-ink-5">
-        <Key label="‹" onClick={() => setPage(pageIndex - 1)} disabled={!model || pageIndex === 0} />
+        <Key
+          label="‹"
+          onClick={() => editorId && view && setPage(editorId, view.pageIndex - 1)}
+          disabled={navDisabled || (view?.pageIndex ?? 0) === 0}
+        />
         <span className="tabular-nums">
-          {model ? `${pageIndex + 1}/${model.pages.length}` : '–/–'}
+          {model && view ? `${view.pageIndex + 1}/${model.pages.length}` : '–/–'}
         </span>
         <Key
           label="›"
-          onClick={() => setPage(pageIndex + 1)}
-          disabled={!model || pageIndex >= (model?.pages.length ?? 1) - 1}
+          onClick={() => editorId && view && setPage(editorId, view.pageIndex + 1)}
+          disabled={navDisabled || (view?.pageIndex ?? 0) >= (model?.pages.length ?? 1) - 1}
         />
       </span>
 
       <span className="flex items-center gap-1 text-ink-5">
-        <Key label="−" onClick={() => setZoom(zoom - 0.25)} disabled={!model} />
-        <span className="w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-        <Key label="+" onClick={() => setZoom(zoom + 0.25)} disabled={!model} />
+        <Key
+          label="−"
+          onClick={() => editorId && view && setZoom(editorId, view.zoom - 0.25)}
+          disabled={navDisabled}
+        />
+        <span className="w-12 text-center tabular-nums">
+          {view ? `${Math.round(view.zoom * 100)}%` : '–'}
+        </span>
+        <Key
+          label="+"
+          onClick={() => editorId && view && setZoom(editorId, view.zoom + 0.25)}
+          disabled={navDisabled}
+        />
       </span>
 
       <Key label="[?]" onClick={toggleHelp} />

@@ -3,7 +3,7 @@ import { groupCells } from '../engine/detect'
 import type { Block, Line, Rect, Word } from '../model/document'
 import { rectContains, unionRect } from '../model/document'
 import { ContextMenu, type MenuItem } from './ContextMenu'
-import { useApp, type EditMode } from './store'
+import { defaultPaneView, useApp, type EditMode } from './store'
 
 /** CSS position of a PDF-user-space rect at the current zoom. */
 function cssRect(bbox: Rect, pageHeight: number, zoom: number) {
@@ -58,13 +58,15 @@ function wordsBBox(words: Word[]): Rect {
 
 const lineText = (line: Line) => line.words.map((w) => w.text).join(' ')
 
-export function PageView() {
+export function EditorPane({ paneId }: { paneId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const {
-    model, renderer, pageIndex, zoom, revision, editing, editMode, busy,
+    model, renderer, revision, editing, editMode, busy,
     history, historyIndex,
     startEdit, cancelEdit, applyEdit, undo, redo, exportPdf, setStatus,
   } = useApp()
+  const view = useApp((s) => s.paneViews[paneId]) ?? defaultPaneView()
+  const { pageIndex, zoom } = view
   const [hovered, setHovered] = useState<Hit | null>(null)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
@@ -75,9 +77,12 @@ export function PageView() {
     const canvas = canvasRef.current
     if (!canvas || !model) return
     let cancelled = false
-    void renderer.renderPage(pageIndex, canvas, zoom).then(({ cssWidth, cssHeight }) => {
-      if (!cancelled) setSize({ w: cssWidth, h: cssHeight })
-    })
+    renderer
+      .renderPage(pageIndex, canvas, zoom)
+      .then(({ cssWidth, cssHeight }) => {
+        if (!cancelled) setSize({ w: cssWidth, h: cssHeight })
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -122,6 +127,8 @@ export function PageView() {
           },
           initial: block.lines.map(lineText).join(' '),
           bbox: block.bbox,
+          pageIndex,
+          paneId,
           multiline: true,
           layout: { maxWidth: block.bbox.w + 2, leading },
         })
@@ -136,10 +143,12 @@ export function PageView() {
         },
         initial: words.map((w) => w.text).join(' '),
         bbox: granularity === 'line' ? hit.line.bbox : wordsBBox(words),
+        pageIndex,
+        paneId,
         multiline: false,
       })
     },
-    [editMode, startEdit],
+    [editMode, startEdit, pageIndex, paneId],
   )
 
   const copyText = useCallback(
@@ -185,7 +194,7 @@ export function PageView() {
 
   if (!model || !page) {
     return (
-      <div className="flex flex-1 items-center justify-center text-ink-4 select-none">
+      <div className="flex h-full items-center justify-center text-ink-4 select-none">
         <pre className="leading-6">{`┌──────────────────────────────┐
 │                              │
 │    drop a pdf here, or use   │
@@ -199,9 +208,10 @@ export function PageView() {
     )
   }
 
+  const paneEditing = editing && editing.paneId === paneId ? editing : null
   let hoverCss: ReturnType<typeof cssRect> | null = null
   let hoverTag: string | null = null
-  if (hovered && !editing) {
+  if (hovered && !paneEditing) {
     const granularity = resolveGranularity(hovered, editMode)
     const bbox =
       granularity === 'block'
@@ -212,15 +222,15 @@ export function PageView() {
     hoverCss = cssRect(bbox, page.height, zoom)
     hoverTag = editMode === 'auto' ? (granularity === 'block' ? 'para' : granularity) : null
   }
-  const editCss = editing ? cssRect(editing.bbox, page.height, zoom) : null
+  const editCss = paneEditing ? cssRect(paneEditing.bbox, page.height, zoom) : null
 
   return (
-    <div className="flex-1 overflow-auto p-6">
+    <div className="h-full overflow-auto p-6">
       <div
         className="relative mx-auto border border-ink-3"
         style={size ? { width: size.w, height: size.h } : undefined}
         onMouseMove={(e) => {
-          if (!editing) setHovered(hitTest(e))
+          if (!paneEditing) setHovered(hitTest(e))
         }}
         onMouseLeave={() => setHovered(null)}
         onClick={(e) => {
@@ -248,13 +258,13 @@ export function PageView() {
           </div>
         )}
 
-        {editing && editCss && (
+        {paneEditing && editCss && (
           <SpanEditor
-            key={`${editing.bbox.x}:${editing.bbox.y}:${editMode}`}
-            initial={editing.initial}
+            key={`${paneEditing.bbox.x}:${paneEditing.bbox.y}:${editMode}`}
+            initial={paneEditing.initial}
             css={editCss}
-            fontSize={Math.min(editing.target.fontSize * zoom, 24)}
-            multiline={editing.multiline}
+            fontSize={Math.min(paneEditing.target.fontSize * zoom, 24)}
+            multiline={paneEditing.multiline}
             onCancel={cancelEdit}
             onApply={(text) => void applyEdit(text)}
           />
