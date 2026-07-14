@@ -16,6 +16,8 @@ const ROWS: [string, string][] = [
   ['drag pdf → elsewhere', 'open as new document'],
   ['ctrl/shift+click page', 'multi-select pages (organizer)'],
   ['right-click selected pages', 'extract or delete the selection'],
+  ['[ sign ]', 'draw/type/upload a signature, initials, or date stamp'],
+  ['drag body / corner', 'move / resize a signature before placing'],
   ['?', 'toggle this help'],
 ]
 

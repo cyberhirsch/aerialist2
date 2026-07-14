@@ -25,7 +25,7 @@ export function Toolbar() {
     fileName, model, busy, editMode, history, historyIndex, paneViews,
     searchQuery, searchCaseSensitive, searchWholeWord, searchMatches, searchIndex,
     requestOpen, setPage, setZoom, setEditMode, exportPdf, undo, redo,
-    toggleHelp, targetEditorPaneId,
+    toggleHelp, targetEditorPaneId, openSignatureDialog,
     setSearchQuery, setSearchCaseSensitive, setSearchWholeWord, searchNext, searchPrev, clearSearch,
   } = useApp()
 
@@ -53,6 +53,7 @@ export function Toolbar() {
         onClick={() => void redo()}
         disabled={busy || historyIndex >= history.length - 1}
       />
+      <Key label="[ sign ]" onClick={openSignatureDialog} disabled={!model || busy} />
 
       <span className="text-ink-3">│</span>
       <span className="flex items-center gap-1">

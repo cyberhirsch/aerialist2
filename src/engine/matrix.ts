@@ -24,6 +24,11 @@ export function apply(m: Matrix, x: number, y: number): [number, number] {
   return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]
 }
 
+/** Apply only the linear part of a transform (no translation) — for deltas, not points. */
+export function applyDelta(m: Matrix, dx: number, dy: number): [number, number] {
+  return [m[0] * dx + m[2] * dy, m[1] * dx + m[3] * dy]
+}
+
 export function translate(m: Matrix, tx: number, ty: number): Matrix {
   return multiply([1, 0, 0, 1, tx, ty], m)
 }
@@ -55,6 +60,39 @@ export function pageViewportTransform(
       return { transform: [0, -s, -s, 0, h * s, w * s], cssWidth: h * s, cssHeight: w * s }
     default:
       return { transform: [s, 0, 0, -s, 0, h * s], cssWidth: w * s, cssHeight: h * s }
+  }
+}
+
+export interface CssBox {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/**
+ * CSS position of a PDF-user-space rect (x, y, w, h — bottom-left
+ * origin) under a page's render transform (zoom, y-flip, rotation).
+ */
+export function rectToCssBox(
+  rect: { x: number; y: number; w: number; h: number },
+  pdfToCss: Matrix,
+): CssBox {
+  const corners = [
+    apply(pdfToCss, rect.x, rect.y),
+    apply(pdfToCss, rect.x + rect.w, rect.y),
+    apply(pdfToCss, rect.x, rect.y + rect.h),
+    apply(pdfToCss, rect.x + rect.w, rect.y + rect.h),
+  ]
+  const xs = corners.map((c) => c[0])
+  const ys = corners.map((c) => c[1])
+  const left = Math.min(...xs)
+  const top = Math.min(...ys)
+  return {
+    left,
+    top,
+    width: Math.max(...xs) - left,
+    height: Math.max(...ys) - top,
   }
 }
 

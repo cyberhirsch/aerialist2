@@ -1,34 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { groupCells } from '../engine/detect'
-import { apply, invert, pageViewportTransform, type Matrix } from '../engine/matrix'
+import { apply, invert, pageViewportTransform, rectToCssBox as cssRect } from '../engine/matrix'
 import type { Block, Line, Rect, Word } from '../model/document'
 import { rectContains, unionRect } from '../model/document'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { FormFieldOverlay } from './FormFieldOverlay'
+import { SignaturePlacer } from './SignaturePlacer'
 import { defaultPaneView, useApp, type EditMode } from './store'
-
-/**
- * CSS position of a PDF-user-space rect under the page's render
- * transform (which accounts for zoom, y-flip, and page rotation).
- */
-function cssRect(bbox: Rect, pdfToCss: Matrix) {
-  const corners = [
-    apply(pdfToCss, bbox.x, bbox.y),
-    apply(pdfToCss, bbox.x + bbox.w, bbox.y),
-    apply(pdfToCss, bbox.x, bbox.y + bbox.h),
-    apply(pdfToCss, bbox.x + bbox.w, bbox.y + bbox.h),
-  ]
-  const xs = corners.map((c) => c[0])
-  const ys = corners.map((c) => c[1])
-  const left = Math.min(...xs)
-  const top = Math.min(...ys)
-  return {
-    left,
-    top,
-    width: Math.max(...xs) - left,
-    height: Math.max(...ys) - top,
-  }
-}
 
 interface Hit {
   block: Block
@@ -327,6 +305,8 @@ export function EditorPane({ paneId }: { paneId: string }) {
             onApply={(text) => void applyEdit(text)}
           />
         )}
+
+        {pdfToCss && <SignaturePlacer paneId={paneId} pdfToCss={pdfToCss} />}
       </div>
 
       {menu && (

@@ -19,8 +19,15 @@ import {
 } from '../model/pageOps'
 import { setFormFieldValue } from '../model/formOps'
 import { findMatches, type SearchMatch } from '../model/search'
+import { placeImage } from '../model/signatureOps'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
+import {
+  loadSignatureLibrary,
+  saveSignatureLibrary,
+  type SavedSignature,
+  type SignatureKind,
+} from './signatureLibrary'
 import {
   closePane,
   defaultLayout,
@@ -58,6 +65,16 @@ export interface PaneView {
   wpm: number
   playing: boolean
   wordPos: number
+}
+
+/** A signature/initials/date-stamp image being positioned before it's embedded. */
+export interface SignaturePlacement {
+  paneId: string
+  pageIndex: number
+  rect: Rect
+  dataUrl: string
+  pngBytes: Uint8Array
+  aspect: number
 }
 
 export const defaultPaneView = (): PaneView => ({
@@ -137,6 +154,19 @@ interface AppState {
   rotatePageAction(index: number, deltaDegrees: number): Promise<void>
   mergeDocumentAt(name: string, bytes: Uint8Array, at: number): Promise<void>
   setFormFieldAction(pageIndex: number, fieldName: string, value: string | boolean): Promise<void>
+
+  signatureLibrary: SavedSignature[]
+  signatureDialogOpen: boolean
+  placement: SignaturePlacement | null
+  openSignatureDialog(): void
+  closeSignatureDialog(): void
+  beginPlacement(dataUrl: string, pngBytes: Uint8Array, aspect: number): void
+  updatePlacementRect(rect: Rect): void
+  cancelPlacement(): void
+  confirmPlacement(): Promise<void>
+  addSavedSignature(kind: SignatureKind, label: string, dataUrl: string, aspect: number): void
+  deleteSavedSignature(id: string): void
+
   openFile(name: string, bytes: Uint8Array): Promise<void>
   setPage(paneId: string, index: number): void
   setZoom(paneId: string, zoom: number): void
@@ -253,6 +283,50 @@ export const useApp = create<AppState>((set, get) => {
     }
   }
 
+  /**
+   * Run a mutation that touches a page's own content stream (e.g.
+   * embedding a signature image) and reload the whole document from
+   * fresh save() bytes afterward, rather than patching the model in
+   * place. Required whenever pdf-lib's page.draw* creates a new
+   * in-memory content stream — reading it back through our own decoder
+   * without a save/reload round-trip would see compressed bytes.
+   */
+  const commitViaReload = async (
+    mutate: () => Promise<void>,
+    verb: string,
+  ): Promise<boolean> => {
+    const { host, busy, renderer } = get()
+    if (!host || busy) return false
+    set({ busy: true, editing: null, status: `${verb} …` })
+    try {
+      await mutate()
+      const bytes = await host.save()
+      const { host: newHost, model: newModel } = await loadDocumentModel(bytes)
+      await renderer.load(bytes)
+      set((s) => {
+        const history = [...s.history.slice(0, s.historyIndex + 1), bytes].slice(
+          -HISTORY_LIMIT,
+        )
+        return {
+          host: newHost,
+          model: newModel,
+          busy: false,
+          revision: s.revision + 1,
+          history,
+          historyIndex: history.length - 1,
+          paneViews: clampViews(s.paneViews, newModel.pages.length),
+          status: `${verb} — done`,
+        }
+      })
+      refreshSearch()
+      get().clearSelection()
+      return true
+    } catch (err) {
+      set({ busy: false, status: `error: ${(err as Error).message}` })
+      return false
+    }
+  }
+
   return {
     fileName: null,
     host: null,
@@ -269,6 +343,10 @@ export const useApp = create<AppState>((set, get) => {
     exportedIndex: -1,
     pendingOpen: null,
     rsvpAnchor: null,
+
+    signatureLibrary: loadSignatureLibrary(),
+    signatureDialogOpen: false,
+    placement: null,
 
     searchQuery: '',
     searchCaseSensitive: false,
@@ -433,6 +511,76 @@ export const useApp = create<AppState>((set, get) => {
       })
     },
 
+    openSignatureDialog() {
+      set({ signatureDialogOpen: true })
+    },
+
+    closeSignatureDialog() {
+      set({ signatureDialogOpen: false })
+    },
+
+    beginPlacement(dataUrl, pngBytes, aspect) {
+      const editorId = get().targetEditorPaneId()
+      const { model } = get()
+      if (!editorId || !model) return
+      const pageIndex = get().paneView(editorId).pageIndex
+      const page = model.pages[pageIndex]
+      if (!page) return
+      const width = Math.min(200, page.width * 0.4)
+      const height = width / aspect
+      const rect: Rect = {
+        x: (page.width - width) / 2,
+        y: Math.max(40, page.height * 0.15),
+        w: width,
+        h: height,
+      }
+      set({
+        signatureDialogOpen: false,
+        placement: { paneId: editorId, pageIndex, rect, dataUrl, pngBytes, aspect },
+      })
+    },
+
+    updatePlacementRect(rect) {
+      set((s) => (s.placement ? { placement: { ...s.placement, rect } } : s))
+    },
+
+    cancelPlacement() {
+      set({ placement: null })
+    },
+
+    async confirmPlacement() {
+      const { placement } = get()
+      if (!placement) return
+      const { pageIndex, rect, pngBytes } = placement
+      const ok = await commitViaReload(async () => {
+        await placeImage(get().host!, pageIndex, pngBytes, rect)
+      }, `placed on page ${pageIndex + 1}`)
+      if (ok) set({ placement: null })
+    },
+
+    addSavedSignature(kind, label, dataUrl, aspect) {
+      set((s) => {
+        const entry: SavedSignature = {
+          id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+          kind,
+          label,
+          dataUrl,
+          aspect,
+        }
+        const list = [...s.signatureLibrary, entry]
+        saveSignatureLibrary(list)
+        return { signatureLibrary: list }
+      })
+    },
+
+    deleteSavedSignature(id) {
+      set((s) => {
+        const list = s.signatureLibrary.filter((sig) => sig.id !== id)
+        saveSignatureLibrary(list)
+        return { signatureLibrary: list }
+      })
+    },
+
     async openFile(name, bytes) {
       set({ busy: true, status: `parsing ${name} …` })
       try {
@@ -467,6 +615,8 @@ export const useApp = create<AppState>((set, get) => {
           searchMatches: [],
           searchIndex: -1,
           selectedPages: new Set(),
+          placement: null,
+          signatureDialogOpen: false,
           status: `${name} — ${model.pages.length} page(s), ${words} words detected.${formsNote} click a word to edit; ? for shortcuts.`,
         }))
       } catch (err) {

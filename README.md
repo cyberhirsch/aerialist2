@@ -14,9 +14,11 @@ Most browser-based PDF "editors" place a text box over the page and hope it look
 
 A Blender-style workspace: the layout is a tree of resizable panes, and each pane's function is switchable from its own header dropdown.
 
-- **editor** — click a word, line, table cell, or paragraph to edit it in place. Auto mode picks the right granularity: paragraphs reflow, tables edit per cell, everything else edits per line.
-- **organizer** — a responsive thumbnail grid for the whole document. Drag to reorder pages, right-click to duplicate/rotate/delete, drop another PDF onto it to merge at that position.
+- **editor** — click a word, line, table cell, or paragraph to edit it in place. Auto mode picks the right granularity: paragraphs reflow, tables edit per cell, everything else edits per line. AcroForm fields render as real, fillable native inputs positioned over the page. Cross-page find with highlighting lives in the toolbar.
+- **organizer** — a responsive thumbnail grid for the whole document. Drag to reorder pages, multi-select with ctrl/shift-click, right-click to duplicate/rotate/delete/extract/split, drop another PDF onto it to merge at that position.
 - **rsvp** — speed-reading pane fed directly from the extracted word stream, with an ORP-style pivot display.
+
+`[ sign ]` opens a dialog to draw, type, or upload a signature (or generate a date stamp), then drag/resize it before it's embedded into the page. Signatures and initials can be saved for reuse across documents.
 
 Split, close, or reassign any pane; the layout persists across reloads. Full undo/redo, keyboard shortcuts, and a right-click context menu throughout. Aesthetic is deliberately minimal: monospace, greyscale, no color accents, terminal-style chrome.
 
@@ -61,20 +63,20 @@ Full product spec: [docs/PRD.md](docs/PRD.md).
 - [x] Add text *(via edit; standalone text insertion still open)*
 - [x] Delete text
 - [x] Font editing *(fallback-font substitution; style controls still open)*
-- [ ] Images
+- [x] Images *(via signature/stamp placement; general insert-anywhere still open)*
 - [ ] Shapes
 - [ ] Highlight
 - [ ] Underline
 - [ ] Drawing
 - [ ] Sticky notes
-- [ ] Signatures
-- [ ] Fill forms
-- [ ] Search
+- [x] Signatures *(draw/type/upload, save for reuse, initials, date stamp)*
+- [x] Fill forms
+- [x] Search
 - [x] Page reorder
 - [x] Rotate pages
 - [x] Delete pages
 - [x] Merge PDFs
-- [ ] Split PDFs
+- [x] Split PDFs
 
 ### P2 — Productivity features
 

@@ -194,6 +194,28 @@ export class PdfHost {
     return { count: copied.length, hasForms }
   }
 
+  /**
+   * Draw a PNG image (signature, initials, date stamp) onto a page.
+   * `rect` is in PDF user-space units.
+   *
+   * NOTE: this appends a new in-memory content stream to the page via
+   * pdf-lib's own drawImage — that stream is created with FlateDecode
+   * "encode: true" and getContents() returns it already *compressed*.
+   * Reading it back through our own decoder without going through a
+   * save()+reload round-trip would feed compressed bytes straight into
+   * the lexer. Callers MUST re-derive the model from fresh save() bytes
+   * afterward (see the store's commitViaReload), not patch it in place.
+   */
+  async embedImage(
+    pageIndex: number,
+    pngBytes: Uint8Array,
+    rect: { x: number; y: number; w: number; h: number },
+  ): Promise<void> {
+    const image = await this.doc.embedPng(pngBytes)
+    const page = this.doc.getPage(pageIndex)
+    page.drawImage(image, { x: rect.x, y: rect.y, width: rect.w, height: rect.h })
+  }
+
   /* ── fallback font ─────────────────────────────────────────── */
 
   private fallbacks = new Map<number, FallbackFont>()

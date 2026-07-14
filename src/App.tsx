@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react'
 import { HelpOverlay } from './ui/HelpOverlay'
 import { SaveDialog } from './ui/SaveDialog'
+import { SignatureDialog } from './ui/SignatureDialog'
 import { StatusBar } from './ui/StatusBar'
 import { Toolbar } from './ui/Toolbar'
 import { WorkspaceView } from './ui/WorkspaceView'
@@ -107,6 +108,10 @@ export default function App() {
         s.toggleHelp()
       } else if (e.key === 'Escape' && s.helpOpen) {
         s.toggleHelp()
+      } else if (e.key === 'Escape' && s.placement) {
+        s.cancelPlacement()
+      } else if (e.key === 'Escape' && s.signatureDialogOpen) {
+        s.closeSignatureDialog()
       } else if (e.key === 'Escape' && s.selectedPages.size > 0) {
         s.clearSelection()
       }
@@ -139,6 +144,7 @@ export default function App() {
       <StatusBar />
       <HelpOverlay />
       <SaveDialog />
+      <SignatureDialog />
     </div>
   )
 }
