@@ -19,6 +19,7 @@ import {
   PDFString,
   StandardFonts,
   decodePDFRawStream,
+  degrees,
 } from 'pdf-lib'
 import type { RawFontData } from '../engine/fonts'
 
@@ -109,6 +110,48 @@ export class PdfHost {
 
   async save(): Promise<Uint8Array> {
     return this.doc.save({ useObjectStreams: false })
+  }
+
+  /* ── page management (commodity ops — pdf-lib territory) ────── */
+
+  /** Move a page so it ends up at `to` in the resulting order. */
+  movePage(from: number, to: number): void {
+    const page = this.doc.getPage(from)
+    this.doc.removePage(from)
+    this.doc.insertPage(to, page)
+  }
+
+  deletePage(index: number): void {
+    this.doc.removePage(index)
+  }
+
+  /** Duplicate a page in place; the copy lands right after the original. */
+  async duplicatePage(index: number): Promise<void> {
+    const [copy] = await this.doc.copyPages(this.doc, [index])
+    this.doc.insertPage(index + 1, copy)
+  }
+
+  /** Rotate a page by a delta of ±90/180 degrees. */
+  rotatePage(index: number, deltaDegrees: number): void {
+    const page = this.doc.getPage(index)
+    const current = page.getRotation().angle
+    page.setRotation(degrees(((current + deltaDegrees) % 360 + 360) % 360))
+  }
+
+  /**
+   * Copy every page of another PDF into this one, starting at `at`.
+   * Returns how many pages were inserted and whether the source had
+   * form fields (which don't survive a page copy intact).
+   */
+  async insertDocument(
+    bytes: Uint8Array,
+    at: number,
+  ): Promise<{ count: number; hasForms: boolean }> {
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true })
+    const copied = await this.doc.copyPages(src, src.getPageIndices())
+    copied.forEach((page, i) => this.doc.insertPage(at + i, page))
+    const hasForms = !!src.catalog.get(PDFName.of('AcroForm'))
+    return { count: copied.length, hasForms }
   }
 
   /* ── fallback font ─────────────────────────────────────────── */

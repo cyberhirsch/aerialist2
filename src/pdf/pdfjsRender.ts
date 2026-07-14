@@ -38,13 +38,15 @@ export class Renderer {
 
   /**
    * Render a page into the canvas at the given zoom (1 = 72 dpi CSS px),
-   * scaled for the device pixel ratio. Returns the CSS size.
+   * scaled for the device pixel ratio. Returns the CSS size plus the
+   * affine transform mapping PDF user space → CSS pixels (accounts for
+   * page /Rotate, so hit-testing works on rotated pages).
    */
   renderPage(
     pageIndex: number,
     canvas: HTMLCanvasElement,
     zoom: number,
-  ): Promise<{ cssWidth: number; cssHeight: number }> {
+  ): Promise<{ cssWidth: number; cssHeight: number; pdfToCss: number[] }> {
     return this.enqueue(pageIndex, async () => {
       if (!this.doc) throw new Error('no document loaded')
       const page = await this.doc.getPage(pageIndex + 1)
@@ -61,7 +63,12 @@ export class Renderer {
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('no 2d context')
       await page.render({ canvas, canvasContext: ctx, viewport }).promise
-      return { cssWidth, cssHeight }
+      const t = viewport.transform
+      return {
+        cssWidth,
+        cssHeight,
+        pdfToCss: [t[0] / dpr, t[1] / dpr, t[2] / dpr, t[3] / dpr, t[4] / dpr, t[5] / dpr],
+      }
     })
   }
 

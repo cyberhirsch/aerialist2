@@ -10,6 +10,13 @@ import { create } from 'zustand'
 import type { Rect } from '../model/document'
 import { loadDocumentModel } from '../model/buildModel'
 import { replaceSpanText, type LayoutOpts, type SpanTarget } from '../model/editText'
+import {
+  deletePage,
+  duplicatePage,
+  insertDocumentAt,
+  movePage,
+  rotatePage,
+} from '../model/pageOps'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
 import {
@@ -96,6 +103,12 @@ interface AppState {
   isDirty(): boolean
   requestOpen(name: string, bytes: Uint8Array): Promise<void>
   resolvePendingOpen(choice: 'export' | 'discard' | 'cancel'): Promise<void>
+
+  movePageAction(from: number, to: number): Promise<void>
+  deletePageAction(index: number): Promise<void>
+  duplicatePageAction(index: number): Promise<void>
+  rotatePageAction(index: number, deltaDegrees: number): Promise<void>
+  mergeDocumentAt(name: string, bytes: Uint8Array, at: number): Promise<void>
   openFile(name: string, bytes: Uint8Array): Promise<void>
   setPage(paneId: string, index: number): void
   setZoom(paneId: string, zoom: number): void
@@ -141,6 +154,33 @@ export const useApp = create<AppState>((set, get) => {
   const persistLayout = (layout: LayoutNode) => {
     saveLayout(layout)
     return layout
+  }
+
+  /** Run a structural page op, then snapshot + re-render + announce. */
+  const commitStructural = async (mutate: () => Promise<string> | string) => {
+    const { host, model, renderer, busy } = get()
+    if (!host || !model || busy) return
+    set({ busy: true, editing: null })
+    try {
+      const message = await mutate()
+      const bytes = await host.save()
+      await renderer.load(bytes)
+      set((s) => {
+        const history = [...s.history.slice(0, s.historyIndex + 1), bytes].slice(
+          -HISTORY_LIMIT,
+        )
+        return {
+          busy: false,
+          revision: s.revision + 1,
+          history,
+          historyIndex: history.length - 1,
+          paneViews: clampViews(s.paneViews, model.pages.length),
+          status: message,
+        }
+      })
+    } catch (err) {
+      set({ busy: false, status: `error: ${(err as Error).message}` })
+    }
   }
 
   return {
@@ -242,6 +282,54 @@ export const useApp = create<AppState>((set, get) => {
       }
       set({ pendingOpen: null })
       await get().openFile(pending.name, pending.bytes)
+    },
+
+    async movePageAction(from, to) {
+      if (from === to) return
+      await commitStructural(() => {
+        movePage(get().host!, get().model!, from, to)
+        return `page ${from + 1} moved to position ${to + 1}`
+      })
+    },
+
+    async deletePageAction(index) {
+      const { model } = get()
+      if (!model || model.pages.length <= 1) {
+        set({ status: 'cannot delete the only page' })
+        return
+      }
+      await commitStructural(() => {
+        deletePage(get().host!, get().model!, index)
+        return `page ${index + 1} deleted`
+      })
+    },
+
+    async duplicatePageAction(index) {
+      await commitStructural(async () => {
+        await duplicatePage(get().host!, get().model!, index)
+        return `page ${index + 1} duplicated`
+      })
+    },
+
+    async rotatePageAction(index, deltaDegrees) {
+      await commitStructural(() => {
+        rotatePage(get().host!, get().model!, index, deltaDegrees)
+        return `page ${index + 1} rotated ${deltaDegrees > 0 ? '⟳' : '⟲'}`
+      })
+    },
+
+    async mergeDocumentAt(name, bytes, at) {
+      await commitStructural(async () => {
+        const { count, hasForms } = await insertDocumentAt(
+          get().host!,
+          get().model!,
+          bytes,
+          at,
+        )
+        return `merged ${name}: ${count} page(s) inserted at position ${at + 1}${
+          hasForms ? ' — note: its form fields may not survive the merge' : ''
+        }`
+      })
     },
 
     async openFile(name, bytes) {

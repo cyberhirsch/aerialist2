@@ -32,3 +32,14 @@ export function translate(m: Matrix, tx: number, ty: number): Matrix {
 export function scaleOf(m: Matrix): [number, number] {
   return [Math.hypot(m[0], m[1]), Math.hypot(m[2], m[3])]
 }
+
+/** Inverse of an affine transform (throws on singular matrices). */
+export function invert(m: Matrix): Matrix {
+  const det = m[0] * m[3] - m[1] * m[2]
+  if (det === 0) throw new Error('singular matrix')
+  const a = m[3] / det
+  const b = -m[1] / det
+  const c = -m[2] / det
+  const d = m[0] / det
+  return [a, b, c, d, -(m[4] * a + m[5] * c), -(m[4] * b + m[5] * d)]
+}

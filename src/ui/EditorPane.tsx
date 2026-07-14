@@ -1,17 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { groupCells } from '../engine/detect'
+import { apply, invert, type Matrix } from '../engine/matrix'
 import type { Block, Line, Rect, Word } from '../model/document'
 import { rectContains, unionRect } from '../model/document'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { defaultPaneView, useApp, type EditMode } from './store'
 
-/** CSS position of a PDF-user-space rect at the current zoom. */
-function cssRect(bbox: Rect, pageHeight: number, zoom: number) {
+/**
+ * CSS position of a PDF-user-space rect under the page's render
+ * transform (which accounts for zoom, y-flip, and page rotation).
+ */
+function cssRect(bbox: Rect, pdfToCss: Matrix) {
+  const corners = [
+    apply(pdfToCss, bbox.x, bbox.y),
+    apply(pdfToCss, bbox.x + bbox.w, bbox.y),
+    apply(pdfToCss, bbox.x, bbox.y + bbox.h),
+    apply(pdfToCss, bbox.x + bbox.w, bbox.y + bbox.h),
+  ]
+  const xs = corners.map((c) => c[0])
+  const ys = corners.map((c) => c[1])
+  const left = Math.min(...xs)
+  const top = Math.min(...ys)
   return {
-    left: bbox.x * zoom,
-    top: (pageHeight - bbox.y - bbox.h) * zoom,
-    width: bbox.w * zoom,
-    height: bbox.h * zoom,
+    left,
+    top,
+    width: Math.max(...xs) - left,
+    height: Math.max(...ys) - top,
   }
 }
 
@@ -69,6 +83,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
   const { pageIndex, zoom } = view
   const [hovered, setHovered] = useState<Hit | null>(null)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
+  const [pdfToCss, setPdfToCss] = useState<Matrix | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
 
   const page = model?.pages[pageIndex] ?? null
@@ -79,8 +94,10 @@ export function EditorPane({ paneId }: { paneId: string }) {
     let cancelled = false
     renderer
       .renderPage(pageIndex, canvas, zoom)
-      .then(({ cssWidth, cssHeight }) => {
-        if (!cancelled) setSize({ w: cssWidth, h: cssHeight })
+      .then(({ cssWidth, cssHeight, pdfToCss }) => {
+        if (cancelled) return
+        setSize({ w: cssWidth, h: cssHeight })
+        setPdfToCss(pdfToCss as Matrix)
       })
       .catch(() => {})
     return () => {
@@ -90,10 +107,13 @@ export function EditorPane({ paneId }: { paneId: string }) {
 
   const hitTest = useCallback(
     (e: React.MouseEvent): Hit | null => {
-      if (!page) return null
+      if (!page || !pdfToCss) return null
       const rect = e.currentTarget.getBoundingClientRect()
-      const px = (e.clientX - rect.left) / zoom
-      const py = page.height - (e.clientY - rect.top) / zoom
+      const [px, py] = apply(
+        invert(pdfToCss),
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+      )
       for (const block of page.blocks) {
         if (!rectContains(block.bbox, px, py)) continue
         for (const line of block.lines) {
@@ -104,7 +124,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
       }
       return null
     },
-    [page, zoom],
+    [page, pdfToCss],
   )
 
   const beginEdit = useCallback(
@@ -211,7 +231,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
   const paneEditing = editing && editing.paneId === paneId ? editing : null
   let hoverCss: ReturnType<typeof cssRect> | null = null
   let hoverTag: string | null = null
-  if (hovered && !paneEditing) {
+  if (hovered && !paneEditing && pdfToCss) {
     const granularity = resolveGranularity(hovered, editMode)
     const bbox =
       granularity === 'block'
@@ -219,10 +239,10 @@ export function EditorPane({ paneId }: { paneId: string }) {
         : granularity === 'line'
           ? hovered.line.bbox
           : wordsBBox(selectionWords(hovered, granularity))
-    hoverCss = cssRect(bbox, page.height, zoom)
+    hoverCss = cssRect(bbox, pdfToCss)
     hoverTag = editMode === 'auto' ? (granularity === 'block' ? 'para' : granularity) : null
   }
-  const editCss = paneEditing ? cssRect(paneEditing.bbox, page.height, zoom) : null
+  const editCss = paneEditing && pdfToCss ? cssRect(paneEditing.bbox, pdfToCss) : null
 
   return (
     <div className="h-full overflow-auto p-6">
