@@ -22,8 +22,8 @@ const MODES = ['auto', 'word', 'line', 'block'] as const
 export function Toolbar() {
   const fileInput = useRef<HTMLInputElement>(null)
   const {
-    fileName, model, pageIndex, zoom, busy, editMode,
-    openFile, setPage, setZoom, setEditMode, exportPdf,
+    fileName, model, pageIndex, zoom, busy, editMode, history, historyIndex,
+    openFile, setPage, setZoom, setEditMode, exportPdf, undo, redo, toggleHelp,
   } = useApp()
 
   const onPick = async (files: FileList | null) => {
@@ -40,6 +40,12 @@ export function Toolbar() {
 
       <Key label="[ open ]" onClick={() => fileInput.current?.click()} disabled={busy} />
       <Key label="[ export ]" onClick={() => void exportPdf()} disabled={!model || busy} />
+      <Key label="[ undo ]" onClick={() => void undo()} disabled={busy || historyIndex <= 0} />
+      <Key
+        label="[ redo ]"
+        onClick={() => void redo()}
+        disabled={busy || historyIndex >= history.length - 1}
+      />
 
       <span className="text-ink-3">│</span>
       <span className="flex items-center text-ink-5">
@@ -87,7 +93,10 @@ export function Toolbar() {
         <Key label="+" onClick={() => setZoom(zoom + 0.25)} disabled={!model} />
       </span>
 
+      <Key label="[?]" onClick={toggleHelp} />
+
       <input
+        id="a2-file-input"
         ref={fileInput}
         type="file"
         accept="application/pdf,.pdf"

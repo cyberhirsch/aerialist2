@@ -133,9 +133,14 @@ export function classifyBlock(lines: Line[]): BlockKind {
   const gappedLines = lines.filter((l) => columnGaps(l) > 0).length
   if (gappedLines >= 2) return 'table'
 
+  // prose paragraphs wrap at a substantial measure; short stacked
+  // lines (headers, addresses) are never that wide
+  const maxW = Math.max(...lines.map((l) => l.bbox.w))
+  const em = lines[0].words[0]?.fontSize ?? 12
+  if (maxW < 18 * em) return 'lines'
+
   // prose: every line break is forced — the next line's first word
   // would not have fit on the line above
-  const maxW = Math.max(...lines.map((l) => l.bbox.w))
   for (let i = 0; i < lines.length - 1; i++) {
     const line = lines[i]
     const nextWord = lines[i + 1].words[0]

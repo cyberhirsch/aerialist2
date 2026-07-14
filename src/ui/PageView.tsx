@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { groupCells } from '../engine/detect'
 import type { Block, Line, Rect, Word } from '../model/document'
 import { rectContains, unionRect } from '../model/document'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 import { useApp, type EditMode } from './store'
 
 /** CSS position of a PDF-user-space rect at the current zoom. */
@@ -61,10 +62,12 @@ export function PageView() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const {
     model, renderer, pageIndex, zoom, revision, editing, editMode, busy,
-    startEdit, cancelEdit, applyEdit,
+    history, historyIndex,
+    startEdit, cancelEdit, applyEdit, undo, redo, exportPdf, setStatus,
   } = useApp()
   const [hovered, setHovered] = useState<Hit | null>(null)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
 
   const page = model?.pages[pageIndex] ?? null
 
@@ -100,8 +103,8 @@ export function PageView() {
   )
 
   const beginEdit = useCallback(
-    (hit: Hit) => {
-      const granularity = resolveGranularity(hit, editMode)
+    (hit: Hit, override?: Granularity) => {
+      const granularity = override ?? resolveGranularity(hit, editMode)
       const words = selectionWords(hit, granularity)
       const first = words[0]
 
@@ -137,6 +140,47 @@ export function PageView() {
       })
     },
     [editMode, startEdit],
+  )
+
+  const copyText = useCallback(
+    (text: string) => {
+      void navigator.clipboard
+        .writeText(text)
+        .then(() => setStatus(`copied "${text.length > 40 ? text.slice(0, 40) + '…' : text}"`))
+        .catch(() => setStatus('copy failed — clipboard unavailable'))
+    },
+    [setStatus],
+  )
+
+  const menuItems = useCallback(
+    (hit: Hit | null): MenuItem[] => {
+      const items: MenuItem[] = []
+      if (hit && !busy) {
+        const cellWords = selectionWords(hit, 'cell')
+        const blockText = hit.block.lines.map(lineText).join(' ')
+        items.push({ label: `edit word "${hit.word.text.slice(0, 16)}"`, action: () => beginEdit(hit, 'word') })
+        if (hit.block.kind === 'table' && cellWords.length > 1) {
+          items.push({ label: 'edit cell', action: () => beginEdit(hit, 'cell') })
+        }
+        items.push({ label: 'edit line', action: () => beginEdit(hit, 'line') })
+        if (hit.block.kind === 'paragraph') {
+          items.push({ label: 'edit paragraph (reflow)', action: () => beginEdit(hit, 'block') })
+        }
+        items.push({ separator: true, label: '' })
+        items.push({ label: 'copy word', action: () => copyText(hit.word.text) })
+        items.push({ label: 'copy line', action: () => copyText(lineText(hit.line)) })
+        if (hit.block.lines.length > 1) {
+          items.push({ label: 'copy block text', action: () => copyText(blockText) })
+        }
+        items.push({ separator: true, label: '' })
+      }
+      items.push({ label: 'undo    ctrl+z', action: () => void undo(), disabled: busy || historyIndex <= 0 })
+      items.push({ label: 'redo    ctrl+y', action: () => void redo(), disabled: busy || historyIndex >= history.length - 1 })
+      items.push({ separator: true, label: '' })
+      items.push({ label: 'export pdf', action: () => void exportPdf(), disabled: busy })
+      return items
+    },
+    [busy, beginEdit, copyText, undo, redo, exportPdf, history, historyIndex],
   )
 
   if (!model || !page) {
@@ -184,6 +228,10 @@ export function PageView() {
           const hit = hitTest(e)
           if (hit) beginEdit(hit)
         }}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          setMenu({ x: e.clientX, y: e.clientY, hit: hitTest(e) })
+        }}
       >
         <canvas ref={canvasRef} className="block" />
 
@@ -212,6 +260,15 @@ export function PageView() {
           />
         )}
       </div>
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems(menu.hit)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }

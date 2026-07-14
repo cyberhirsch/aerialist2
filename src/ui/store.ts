@@ -35,6 +35,10 @@ interface AppState {
   editing: EditingState | null
   editMode: EditMode
   busy: boolean
+  helpOpen: boolean
+  /** Saved document snapshots; historyIndex points at the current one. */
+  history: Uint8Array[]
+  historyIndex: number
 
   openFile(name: string, bytes: Uint8Array): Promise<void>
   setPage(index: number): void
@@ -43,11 +47,42 @@ interface AppState {
   startEdit(editing: Omit<EditingState, 'pageIndex'>): void
   cancelEdit(): void
   applyEdit(newText: string): Promise<void>
+  undo(): Promise<void>
+  redo(): Promise<void>
   exportPdf(): Promise<void>
+  toggleHelp(): void
   setStatus(msg: string): void
 }
 
-export const useApp = create<AppState>((set, get) => ({
+/** Cap on kept snapshots — one full PDF per edit. */
+const HISTORY_LIMIT = 30
+
+export const useApp = create<AppState>((set, get) => {
+  /** Move historyIndex by `dir` and restore that document snapshot. */
+  const restoreSnapshot = async (dir: -1 | 1, verb: string) => {
+    const { history, historyIndex, renderer, busy, pageIndex } = get()
+    const nextIndex = historyIndex + dir
+    if (busy || nextIndex < 0 || nextIndex >= history.length) return
+    set({ busy: true, editing: null, status: `${verb} …` })
+    try {
+      const bytes = history[nextIndex]
+      const { host, model } = await loadDocumentModel(bytes)
+      await renderer.load(bytes)
+      set((s) => ({
+        host,
+        model,
+        busy: false,
+        historyIndex: nextIndex,
+        pageIndex: Math.min(pageIndex, model.pages.length - 1),
+        revision: s.revision + 1,
+        status: `${verb} (${nextIndex + 1}/${history.length} states)`,
+      }))
+    } catch (err) {
+      set({ busy: false, status: `error: ${(err as Error).message}` })
+    }
+  }
+
+  return {
   fileName: null,
   host: null,
   model: null,
@@ -59,6 +94,9 @@ export const useApp = create<AppState>((set, get) => ({
   editing: null,
   editMode: 'auto',
   busy: false,
+  helpOpen: false,
+  history: [],
+  historyIndex: -1,
 
   async openFile(name, bytes) {
     set({ busy: true, status: `parsing ${name} …` })
@@ -81,7 +119,9 @@ export const useApp = create<AppState>((set, get) => ({
         editing: null,
         revision: s.revision + 1,
         busy: false,
-        status: `${name} — ${model.pages.length} page(s), ${words} words detected. click a word to edit.`,
+        history: [bytes],
+        historyIndex: 0,
+        status: `${name} — ${model.pages.length} page(s), ${words} words detected. click a word to edit; ? for shortcuts.`,
       }))
     } catch (err) {
       set({ busy: false, status: `error: ${(err as Error).message}` })
@@ -143,15 +183,34 @@ export const useApp = create<AppState>((set, get) => ({
         outcome.lineCount > 1 ? `rewrapped to ${outcome.lineCount} lines` : null,
         outcome.usedFallbackFont ? 'replacement font embedded' : null,
       ].filter(Boolean)
-      set((s) => ({
-        busy: false,
-        editing: null,
-        revision: s.revision + 1,
-        status: `"${summary}" replaced — content stream rewritten${notes.length ? ` (${notes.join(', ')})` : ''}`,
-      }))
+      set((s) => {
+        const history = [...s.history.slice(0, s.historyIndex + 1), bytes].slice(
+          -HISTORY_LIMIT,
+        )
+        return {
+          busy: false,
+          editing: null,
+          revision: s.revision + 1,
+          history,
+          historyIndex: history.length - 1,
+          status: `"${summary}" replaced — content stream rewritten${notes.length ? ` (${notes.join(', ')})` : ''}`,
+        }
+      })
     } catch (err) {
       set({ busy: false, editing: null, status: `error: ${(err as Error).message}` })
     }
+  },
+
+  async undo() {
+    await restoreSnapshot(-1, 'undone')
+  },
+
+  async redo() {
+    await restoreSnapshot(1, 'redone')
+  },
+
+  toggleHelp() {
+    set((s) => ({ helpOpen: !s.helpOpen }))
   },
 
   async exportPdf() {
@@ -176,4 +235,5 @@ export const useApp = create<AppState>((set, get) => ({
   setStatus(msg) {
     set({ status: msg })
   },
-}))
+  }
+})
