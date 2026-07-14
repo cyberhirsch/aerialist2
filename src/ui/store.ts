@@ -17,6 +17,7 @@ import {
   movePage,
   rotatePage,
 } from '../model/pageOps'
+import { setFormFieldValue } from '../model/formOps'
 import { findMatches, type SearchMatch } from '../model/search'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
@@ -135,6 +136,7 @@ interface AppState {
   duplicatePageAction(index: number): Promise<void>
   rotatePageAction(index: number, deltaDegrees: number): Promise<void>
   mergeDocumentAt(name: string, bytes: Uint8Array, at: number): Promise<void>
+  setFormFieldAction(pageIndex: number, fieldName: string, value: string | boolean): Promise<void>
   openFile(name: string, bytes: Uint8Array): Promise<void>
   setPage(paneId: string, index: number): void
   setZoom(paneId: string, zoom: number): void
@@ -424,6 +426,13 @@ export const useApp = create<AppState>((set, get) => {
       })
     },
 
+    async setFormFieldAction(pageIndex, fieldName, value) {
+      await commitStructural(() => {
+        setFormFieldValue(get().host!, get().model!, pageIndex, fieldName, value)
+        return `field "${fieldName}" updated`
+      })
+    },
+
     async openFile(name, bytes) {
       set({ busy: true, status: `parsing ${name} …` })
       try {
@@ -437,6 +446,12 @@ export const useApp = create<AppState>((set, get) => {
             ),
           0,
         )
+        const formFieldNames = new Set(
+          model.pages.flatMap((p) => p.formFields.map((f) => f.name)),
+        )
+        const formsNote = formFieldNames.size
+          ? ` ${formFieldNames.size} form field(s) detected — click to fill.`
+          : ''
         set((s) => ({
           fileName: name,
           host,
@@ -452,7 +467,7 @@ export const useApp = create<AppState>((set, get) => {
           searchMatches: [],
           searchIndex: -1,
           selectedPages: new Set(),
-          status: `${name} — ${model.pages.length} page(s), ${words} words detected. click a word to edit; ? for shortcuts.`,
+          status: `${name} — ${model.pages.length} page(s), ${words} words detected.${formsNote} click a word to edit; ? for shortcuts.`,
         }))
       } catch (err) {
         set({ busy: false, status: `error: ${(err as Error).message}` })

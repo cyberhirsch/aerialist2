@@ -7,16 +7,20 @@
 
 import {
   PDFArray,
+  PDFCheckBox,
   PDFDict,
   PDFDocument,
+  PDFDropdown,
   PDFFont,
   PDFHexString,
   PDFName,
   PDFNumber,
+  PDFRadioGroup,
   PDFRawStream,
   PDFRef,
   PDFStream,
   PDFString,
+  PDFTextField,
   StandardFonts,
   decodePDFRawStream,
   degrees,
@@ -40,6 +44,27 @@ export interface HostPage {
   rotation: number
   contentBytes: Uint8Array
   fonts: RawFontData[]
+}
+
+export type FormFieldKind = 'text' | 'checkbox' | 'radio' | 'dropdown'
+
+/**
+ * An AcroForm field's widget on one page, as plain data — pdf-lib's
+ * form API does all the real work; this is just what it hands over.
+ * Radio groups produce one entry per option widget, sharing `name`
+ * and the group's current `value`, distinguished by `optionValue`.
+ */
+export interface FormField {
+  name: string
+  kind: FormFieldKind
+  rect: { x: number; y: number; w: number; h: number }
+  readOnly: boolean
+  /** Current text (text fields) or selected option (radio/dropdown). */
+  value: string
+  checked?: boolean
+  options?: string[]
+  optionValue?: string
+  multiline?: boolean
 }
 
 export class PdfHost {
@@ -316,6 +341,107 @@ export class PdfHost {
       out.push(item instanceof PDFNumber ? item.asNumber() : 0)
     }
     return out
+  }
+
+  /* ── forms (AcroForm — pdf-lib territory) ────────────────────── */
+
+  /** Every form field widget on a page, as plain data. */
+  pageFormFields(pageIndex: number): FormField[] {
+    let fields
+    try {
+      fields = this.doc.getForm().getFields()
+    } catch {
+      return [] // no AcroForm at all
+    }
+
+    const page = this.doc.getPage(pageIndex)
+    const out: FormField[] = []
+    const rectOf = (r: { x: number; y: number; width: number; height: number }) => ({
+      x: r.x,
+      y: r.y,
+      w: r.width,
+      h: r.height,
+    })
+
+    for (const field of fields) {
+      // getWidgets() builds fresh wrapper objects each call, so calling
+      // it once and reusing the array is required for the indexOf
+      // lookup below to work (reference equality across two calls
+      // would never match, even for the same underlying widget).
+      const allWidgets = field.acroField.getWidgets()
+      const widgetsOnPage = allWidgets.filter((w) => w.P() === page.ref)
+      if (widgetsOnPage.length === 0) continue
+      const name = field.getName()
+      const readOnly = field.isReadOnly()
+
+      if (field instanceof PDFTextField) {
+        out.push({
+          name,
+          kind: 'text',
+          rect: rectOf(widgetsOnPage[0].getRectangle()),
+          readOnly,
+          value: field.getText() ?? '',
+          multiline: field.isMultiline(),
+        })
+      } else if (field instanceof PDFCheckBox) {
+        out.push({
+          name,
+          kind: 'checkbox',
+          rect: rectOf(widgetsOnPage[0].getRectangle()),
+          readOnly,
+          value: '',
+          checked: field.isChecked(),
+        })
+      } else if (field instanceof PDFDropdown) {
+        out.push({
+          name,
+          kind: 'dropdown',
+          rect: rectOf(widgetsOnPage[0].getRectangle()),
+          readOnly,
+          value: field.getSelected()[0] ?? '',
+          options: field.getOptions(),
+        })
+      } else if (field instanceof PDFRadioGroup) {
+        const selected = field.getSelected() ?? ''
+        const options = field.getOptions()
+        // Widgets' own "on" appearance-state names are index strings
+        // ("0", "1", …) into this same widget order — the human-readable
+        // label lives in getOptions() (from /Opt when present, otherwise
+        // it *is* each widget's on-value). Map by position, not by name.
+        for (const widget of widgetsOnPage) {
+          const idx = allWidgets.indexOf(widget)
+          const optionValue = options[idx]
+          if (optionValue === undefined) continue
+          out.push({
+            name,
+            kind: 'radio',
+            rect: rectOf(widget.getRectangle()),
+            readOnly,
+            value: selected,
+            optionValue,
+            options,
+          })
+        }
+      }
+      // buttons, option lists, and signature fields are not yet supported
+    }
+    return out
+  }
+
+  /** Write a value into a named form field (text, checkbox, radio, or dropdown). */
+  setFieldValue(name: string, value: string | boolean): void {
+    const field = this.doc.getForm().getField(name)
+    if (field instanceof PDFCheckBox) {
+      if (value) field.check()
+      else field.uncheck()
+    } else if (field instanceof PDFRadioGroup) {
+      if (typeof value === 'string' && value) field.select(value)
+      else field.clear()
+    } else if (field instanceof PDFDropdown) {
+      if (typeof value === 'string') field.select(value)
+    } else if (field instanceof PDFTextField) {
+      field.setText(typeof value === 'string' ? value : '')
+    }
   }
 
   /* ── lookup helpers ────────────────────────────────────────── */

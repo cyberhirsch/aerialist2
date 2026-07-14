@@ -4,6 +4,7 @@ import { apply, invert, pageViewportTransform, type Matrix } from '../engine/mat
 import type { Block, Line, Rect, Word } from '../model/document'
 import { rectContains, unionRect } from '../model/document'
 import { ContextMenu, type MenuItem } from './ContextMenu'
+import { FormFieldOverlay } from './FormFieldOverlay'
 import { defaultPaneView, useApp, type EditMode } from './store'
 
 /**
@@ -276,6 +277,17 @@ export function EditorPane({ paneId }: { paneId: string }) {
         }}
       >
         <canvas ref={canvasRef} className="block" />
+
+        {pdfToCss &&
+          page.formFields.map((field) => (
+            <FormFieldOverlay
+              key={field.name + (field.optionValue ?? '')}
+              field={field}
+              css={cssRect(field.rect, pdfToCss)}
+              fontSize={Math.min(field.rect.h * zoom * 0.7, 16)}
+              pageIndex={pageIndex}
+            />
+          ))}
 
         {pdfToCss &&
           pageMatches.map(({ m, i }) => (

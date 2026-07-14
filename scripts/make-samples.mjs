@@ -47,3 +47,43 @@ await mkdir(outDir, { recursive: true })
   await writeFile(new URL('invoice.pdf', outDir), await doc.save())
   console.log('wrote public/samples/invoice.pdf')
 }
+
+{
+  const doc = await PDFDocument.create()
+  const helvetica = await doc.embedFont(StandardFonts.Helvetica)
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold)
+  const page = doc.addPage([612, 792])
+  const form = doc.getForm()
+
+  page.drawText('Registration Form', { x: 72, y: 730, size: 18, font: bold })
+
+  page.drawText('Full name', { x: 72, y: 690, size: 10, font: helvetica })
+  const nameField = form.createTextField('fullName')
+  nameField.addToPage(page, { x: 72, y: 665, width: 260, height: 20 })
+
+  page.drawText('Comments', { x: 72, y: 630, size: 10, font: helvetica })
+  const notesField = form.createTextField('comments')
+  notesField.enableMultiline()
+  notesField.addToPage(page, { x: 72, y: 560, width: 400, height: 60 })
+
+  const subscribeField = form.createCheckBox('subscribe')
+  subscribeField.addToPage(page, { x: 72, y: 525, width: 16, height: 16 })
+  page.drawText('Subscribe to newsletter', { x: 96, y: 528, size: 11, font: helvetica })
+
+  page.drawText('Plan', { x: 72, y: 495, size: 10, font: helvetica })
+  const planField = form.createRadioGroup('plan')
+  planField.addOptionToPage('basic', page, { x: 72, y: 470, width: 16, height: 16 })
+  page.drawText('Basic', { x: 96, y: 473, size: 11, font: helvetica })
+  planField.addOptionToPage('pro', page, { x: 180, y: 470, width: 16, height: 16 })
+  page.drawText('Pro', { x: 204, y: 473, size: 11, font: helvetica })
+  planField.select('basic')
+
+  page.drawText('Country', { x: 72, y: 440, size: 10, font: helvetica })
+  const countryField = form.createDropdown('country')
+  countryField.addOptions(['United States', 'Germany', 'Japan'])
+  countryField.select('United States')
+  countryField.addToPage(page, { x: 72, y: 415, width: 180, height: 20 })
+
+  await writeFile(new URL('registration-form.pdf', outDir), await doc.save())
+  console.log('wrote public/samples/registration-form.pdf')
+}

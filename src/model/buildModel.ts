@@ -35,6 +35,7 @@ export function buildPageModel(host: PdfHost, index: number): PageModel {
     height: page.height,
     rotation: page.rotation,
     blocks: buildBlocks(glyphs),
+    formFields: host.pageFormFields(index),
     ops,
     contentBytes: page.contentBytes,
     fonts,

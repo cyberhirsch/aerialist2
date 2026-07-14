@@ -5,6 +5,9 @@
 
 import type { Operation } from '../engine/contentParser'
 import type { ParsedFont } from '../engine/fonts'
+import type { FormField } from '../pdf/pdflibHost'
+
+export type { FormField }
 
 export interface Rect {
   x: number
@@ -78,6 +81,7 @@ export interface PageModel {
   /** Page /Rotate in degrees (0, 90, 180, 270). */
   rotation: number
   blocks: Block[]
+  formFields: FormField[]
   /** Parsed operations of the (concatenated) content stream. */
   ops: Operation[]
   /** The decoded content stream bytes the ops were parsed from. */
