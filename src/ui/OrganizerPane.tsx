@@ -10,9 +10,11 @@ const PAGE_DRAG_TYPE = 'application/x-aerialist-page'
 export function OrganizerPane({ paneId }: { paneId: string }) {
   void paneId
   const {
-    model, revision, busy,
+    model, revision, busy, selectedPages,
     setPage, targetEditorPaneId, movePageAction, mergeDocumentAt,
     deletePageAction, duplicatePageAction, rotatePageAction,
+    toggleSelectPage, selectRangeTo, clearSelection,
+    extractPagesAction, splitAtAction, deleteSelectedAction,
   } = useApp()
   // callback-ref + state: the grid container mounts conditionally (only
   // once a document exists), so a mount-once effect would miss it
@@ -81,25 +83,52 @@ export function OrganizerPane({ paneId }: { paneId: string }) {
     )
   }
 
-  const menuItems = (page: number): MenuItem[] => [
-    {
+  const menuItems = (page: number): MenuItem[] => {
+    const selCount = selectedPages.size
+    const items: MenuItem[] = []
+
+    if (selCount > 1 && selectedPages.has(page)) {
+      items.push({
+        label: `extract ${selCount} selected pages → pdf`,
+        action: () => void extractPagesAction([...selectedPages]),
+        disabled: busy,
+      })
+      items.push({
+        label: `delete ${selCount} selected pages`,
+        action: () => void deleteSelectedAction(),
+        disabled: busy || selCount >= model.pages.length,
+      })
+      items.push({ separator: true, label: '' })
+    }
+
+    items.push({
       label: 'show in editor',
       action: () => {
         const id = targetEditorPaneId()
         if (id) setPage(id, page)
       },
-    },
-    { separator: true, label: '' },
-    { label: 'duplicate page', action: () => void duplicatePageAction(page), disabled: busy },
-    { label: 'rotate ⟳ 90°', action: () => void rotatePageAction(page, 90), disabled: busy },
-    { label: 'rotate ⟲ 90°', action: () => void rotatePageAction(page, -90), disabled: busy },
-    { separator: true, label: '' },
-    {
+    })
+    items.push({ separator: true, label: '' })
+    items.push({ label: 'duplicate page', action: () => void duplicatePageAction(page), disabled: busy })
+    items.push({ label: 'rotate ⟳ 90°', action: () => void rotatePageAction(page, 90), disabled: busy })
+    items.push({ label: 'rotate ⟲ 90°', action: () => void rotatePageAction(page, -90), disabled: busy })
+    items.push({ separator: true, label: '' })
+    items.push({ label: 'extract this page → pdf', action: () => void extractPagesAction([page]), disabled: busy })
+    if (page > 0) {
+      items.push({
+        label: 'split before this page → 2 files',
+        action: () => void splitAtAction(page),
+        disabled: busy,
+      })
+    }
+    items.push({ separator: true, label: '' })
+    items.push({
       label: 'delete page',
       action: () => void deletePageAction(page),
       disabled: busy || model.pages.length <= 1,
-    },
-  ]
+    })
+    return items
+  }
 
   return (
     <div
@@ -128,7 +157,17 @@ export function OrganizerPane({ paneId }: { paneId: string }) {
             width={thumbW}
             aspect={page.height / page.width}
             showInsertBar={insertAt === i}
-            onClick={() => {
+            selected={selectedPages.has(i)}
+            onClick={(e) => {
+              if (e.ctrlKey || e.metaKey) {
+                toggleSelectPage(i)
+                return
+              }
+              if (e.shiftKey) {
+                selectRangeTo(i)
+                return
+              }
+              clearSelection()
               const id = targetEditorPaneId()
               if (id) setPage(id, i)
             }}
@@ -154,12 +193,13 @@ export function OrganizerPane({ paneId }: { paneId: string }) {
   )
 }
 
-function Thumb({ index, width, aspect, showInsertBar, onClick, onContextMenu }: {
+function Thumb({ index, width, aspect, showInsertBar, selected, onClick, onContextMenu }: {
   index: number
   width: number
   aspect: number
   showInsertBar: boolean
-  onClick: () => void
+  selected: boolean
+  onClick: (e: React.MouseEvent) => void
   onContextMenu: (e: React.MouseEvent) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -222,13 +262,18 @@ function Thumb({ index, width, aspect, showInsertBar, onClick, onContextMenu }: 
         }}
         onClick={onClick}
         onContextMenu={onContextMenu}
-        className="cursor-pointer border border-ink-3 bg-ink-1 hover:border-ink-5"
+        className={
+          'cursor-pointer border ' +
+          (selected ? 'border-ink-6 bg-ink-2' : 'border-ink-3 bg-ink-1 hover:border-ink-5')
+        }
         style={{ minHeight: width * aspect }}
-        title={`page ${index + 1} — drag to reorder`}
+        title={`page ${index + 1} — drag to reorder, ctrl/shift+click to select`}
       >
         <canvas ref={canvasRef} className={rendered ? 'block' : 'block opacity-0'} />
       </div>
-      <div className="mt-0.5 text-center text-[10px] text-ink-4">{index + 1}</div>
+      <div className={'mt-0.5 text-center text-[10px] ' + (selected ? 'text-ink-6' : 'text-ink-4')}>
+        {index + 1}
+      </div>
     </div>
   )
 }

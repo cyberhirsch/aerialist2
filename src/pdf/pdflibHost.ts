@@ -142,6 +142,18 @@ export class PdfHost {
   }
 
   /**
+   * Build a new standalone PDF containing only the given page indices,
+   * in the order given. Does not mutate this document — used for
+   * split/extract, which produce a separate downloaded file.
+   */
+  async extractPages(indices: number[]): Promise<Uint8Array> {
+    const out = await PDFDocument.create()
+    const copied = await out.copyPages(this.doc, indices)
+    copied.forEach((page) => out.addPage(page))
+    return out.save({ useObjectStreams: false })
+  }
+
+  /**
    * Copy every page of another PDF into this one, starting at `at`.
    * Returns how many pages were inserted and whether the source had
    * form fields (which don't survive a page copy intact).

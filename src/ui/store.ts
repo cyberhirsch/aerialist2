@@ -102,6 +102,15 @@ interface AppState {
   searchPrev(): void
   clearSearch(): void
 
+  /** Multi-selected page indices in the organizer. */
+  selectedPages: Set<number>
+  toggleSelectPage(index: number): void
+  selectRangeTo(index: number): void
+  clearSelection(): void
+  extractPagesAction(indices: number[]): Promise<void>
+  splitAtAction(index: number): Promise<void>
+  deleteSelectedAction(): Promise<void>
+
   layout: LayoutNode
   focusedPaneId: string | null
   paneViews: Record<string, PaneView>
@@ -143,7 +152,20 @@ interface AppState {
 /** Cap on kept snapshots — one full PDF per edit. */
 const HISTORY_LIMIT = 30
 
+function downloadBytes(bytes: Uint8Array, filename: string): void {
+  const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: 'application/pdf' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export const useApp = create<AppState>((set, get) => {
+  /** Anchor for shift-click range selection in the organizer. */
+  let selectionAnchor: number | null = null
+
   /** Move historyIndex by `dir` and restore that document snapshot. */
   const restoreSnapshot = async (dir: -1 | 1, verb: string) => {
     const { history, historyIndex, renderer, busy } = get()
@@ -164,6 +186,7 @@ export const useApp = create<AppState>((set, get) => {
         status: `${verb} (${nextIndex + 1}/${history.length} states)`,
       }))
       refreshSearch()
+      get().clearSelection()
     } catch (err) {
       set({ busy: false, status: `error: ${(err as Error).message}` })
     }
@@ -222,6 +245,7 @@ export const useApp = create<AppState>((set, get) => {
         }
       })
       refreshSearch()
+      get().clearSelection()
     } catch (err) {
       set({ busy: false, status: `error: ${(err as Error).message}` })
     }
@@ -249,6 +273,8 @@ export const useApp = create<AppState>((set, get) => {
     searchWholeWord: false,
     searchMatches: [],
     searchIndex: -1,
+
+    selectedPages: new Set(),
 
     layout: loadLayout() ?? defaultLayout(),
     focusedPaneId: null,
@@ -355,6 +381,21 @@ export const useApp = create<AppState>((set, get) => {
       })
     },
 
+    async deleteSelectedAction() {
+      const { model, selectedPages } = get()
+      if (!model || selectedPages.size === 0) return
+      if (selectedPages.size >= model.pages.length) {
+        set({ status: 'cannot delete all pages' })
+        return
+      }
+      // descending order so earlier deletes don't shift later indices
+      const indices = [...selectedPages].sort((a, b) => b - a)
+      await commitStructural(() => {
+        for (const idx of indices) deletePage(get().host!, get().model!, idx)
+        return `${indices.length} page(s) deleted`
+      })
+    },
+
     async duplicatePageAction(index) {
       await commitStructural(async () => {
         await duplicatePage(get().host!, get().model!, index)
@@ -410,6 +451,7 @@ export const useApp = create<AppState>((set, get) => {
           searchQuery: '',
           searchMatches: [],
           searchIndex: -1,
+          selectedPages: new Set(),
           status: `${name} — ${model.pages.length} page(s), ${words} words detected. click a word to edit; ? for shortcuts.`,
         }))
       } catch (err) {
@@ -511,16 +553,84 @@ export const useApp = create<AppState>((set, get) => {
       set({ busy: true, status: 'exporting …' })
       try {
         const bytes = await host.save()
-        const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: 'application/pdf' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = (fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '_edited.pdf'
-        a.click()
-        URL.revokeObjectURL(url)
-        set((s) => ({ busy: false, exportedIndex: s.historyIndex, status: `exported ${a.download}` }))
+        const filename = (fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '_edited.pdf'
+        downloadBytes(bytes, filename)
+        set((s) => ({ busy: false, exportedIndex: s.historyIndex, status: `exported ${filename}` }))
       } catch (err) {
         set({ busy: false, status: `export error: ${(err as Error).message}` })
+      }
+    },
+
+    toggleSelectPage(index) {
+      set((s) => {
+        const next = new Set(s.selectedPages)
+        if (next.has(index)) next.delete(index)
+        else next.add(index)
+        return { selectedPages: next }
+      })
+      selectionAnchor = index
+    },
+
+    selectRangeTo(index) {
+      const anchor = selectionAnchor ?? index
+      const [lo, hi] = anchor <= index ? [anchor, index] : [index, anchor]
+      const next = new Set<number>()
+      for (let i = lo; i <= hi; i++) next.add(i)
+      set({ selectedPages: next })
+      selectionAnchor = anchor
+    },
+
+    clearSelection() {
+      selectionAnchor = null
+      set((s) => (s.selectedPages.size ? { selectedPages: new Set() } : s))
+    },
+
+    async extractPagesAction(indices) {
+      const { host, fileName, busy } = get()
+      if (!host || busy || indices.length === 0) return
+      set({ busy: true, status: 'extracting pages …' })
+      try {
+        const sorted = [...indices].sort((a, b) => a - b)
+        const bytes = await host.extractPages(sorted)
+        const base = (fileName ?? 'document.pdf').replace(/\.pdf$/i, '')
+        const suffix =
+          sorted.length === 1
+            ? `p${sorted[0] + 1}`
+            : `pages-${sorted[0] + 1}-${sorted[sorted.length - 1] + 1}`
+        const filename = `${base}_${suffix}.pdf`
+        downloadBytes(bytes, filename)
+        set({ busy: false, status: `extracted ${sorted.length} page(s) → ${filename}` })
+      } catch (err) {
+        set({ busy: false, status: `error: ${(err as Error).message}` })
+      }
+    },
+
+    async splitAtAction(index) {
+      const { host, model, fileName, busy } = get()
+      if (!host || !model || busy) return
+      if (index <= 0 || index >= model.pages.length) {
+        set({ status: 'nothing to split at the first page' })
+        return
+      }
+      set({ busy: true, status: 'splitting …' })
+      try {
+        const before = Array.from({ length: index }, (_, i) => i)
+        const after = Array.from({ length: model.pages.length - index }, (_, i) => index + i)
+        const base = (fileName ?? 'document.pdf').replace(/\.pdf$/i, '')
+        const [bytesA, bytesB] = await Promise.all([
+          host.extractPages(before),
+          host.extractPages(after),
+        ])
+        const nameA = `${base}_part1.pdf`
+        const nameB = `${base}_part2.pdf`
+        downloadBytes(bytesA, nameA)
+        downloadBytes(bytesB, nameB)
+        set({
+          busy: false,
+          status: `split at page ${index + 1}: ${nameA} (${before.length}p) + ${nameB} (${after.length}p)`,
+        })
+      } catch (err) {
+        set({ busy: false, status: `error: ${(err as Error).message}` })
       }
     },
 

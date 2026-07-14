@@ -78,4 +78,26 @@ describe('page operations', () => {
     const { model: reloaded } = await loadDocumentModel(await host.save())
     expect(pageLabels(reloaded)).toEqual(['Alpha', 'One', 'Two', 'Beta'])
   })
+
+  it('extracts a subset of pages into a new standalone PDF, in the given order', async () => {
+    const { host, model } = await loadDocumentModel(await makePdf(['Alpha', 'Beta', 'Gamma', 'Delta']))
+    const extracted = await host.extractPages([2, 0])
+    const { model: extractedModel } = await loadDocumentModel(extracted)
+    expect(pageLabels(extractedModel)).toEqual(['Gamma', 'Alpha'])
+
+    // extraction must not mutate the source document or model
+    expect(pageLabels(model)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta'])
+    const { model: sourceReloaded } = await loadDocumentModel(await host.save())
+    expect(pageLabels(sourceReloaded)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta'])
+  })
+
+  it('splits a document at a page into two extracted PDFs (mirrors extractPages)', async () => {
+    const { host } = await loadDocumentModel(await makePdf(['Alpha', 'Beta', 'Gamma', 'Delta']))
+    const partA = await host.extractPages([0, 1])
+    const partB = await host.extractPages([2, 3])
+    const { model: modelA } = await loadDocumentModel(partA)
+    const { model: modelB } = await loadDocumentModel(partB)
+    expect(pageLabels(modelA)).toEqual(['Alpha', 'Beta'])
+    expect(pageLabels(modelB)).toEqual(['Gamma', 'Delta'])
+  })
 })

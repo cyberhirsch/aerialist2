@@ -107,6 +107,8 @@ export default function App() {
         s.toggleHelp()
       } else if (e.key === 'Escape' && s.helpOpen) {
         s.toggleHelp()
+      } else if (e.key === 'Escape' && s.selectedPages.size > 0) {
+        s.clearSelection()
       }
     }
     window.addEventListener('keydown', onKey)

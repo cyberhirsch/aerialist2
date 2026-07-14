@@ -14,6 +14,8 @@ const ROWS: [string, string][] = [
   ['space', 'play / pause rsvp (when focused)'],
   ['drag pdf → organizer', 'merge at drop position'],
   ['drag pdf → elsewhere', 'open as new document'],
+  ['ctrl/shift+click page', 'multi-select pages (organizer)'],
+  ['right-click selected pages', 'extract or delete the selection'],
   ['?', 'toggle this help'],
 ]
 
