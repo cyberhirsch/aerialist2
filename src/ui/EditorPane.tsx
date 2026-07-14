@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { groupCells } from '../engine/detect'
-import { apply, invert, type Matrix } from '../engine/matrix'
+import { apply, invert, pageViewportTransform, type Matrix } from '../engine/matrix'
 import type { Block, Line, Rect, Word } from '../model/document'
 import { rectContains, unionRect } from '../model/document'
 import { ContextMenu, type MenuItem } from './ContextMenu'
@@ -82,27 +82,25 @@ export function EditorPane({ paneId }: { paneId: string }) {
   const view = useApp((s) => s.paneViews[paneId]) ?? defaultPaneView()
   const { pageIndex, zoom } = view
   const [hovered, setHovered] = useState<Hit | null>(null)
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
-  const [pdfToCss, setPdfToCss] = useState<Matrix | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
 
   const page = model?.pages[pageIndex] ?? null
 
+  // geometry is synchronous — hit-testing and overlays never wait on
+  // the async canvas paint below
+  const viewport = page
+    ? pageViewportTransform(page.width, page.height, page.rotation, zoom)
+    : null
+  const pdfToCss = viewport?.transform ?? null
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !model) return
-    let cancelled = false
-    renderer
-      .renderPage(pageIndex, canvas, zoom)
-      .then(({ cssWidth, cssHeight, pdfToCss }) => {
-        if (cancelled) return
-        setSize({ w: cssWidth, h: cssHeight })
-        setPdfToCss(pdfToCss as Matrix)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    renderer.renderPage(pageIndex, canvas, zoom).catch((err: unknown) => {
+      // superseded renders (document reloaded mid-render) are expected;
+      // anything else should be visible during development
+      console.warn('renderPage failed:', err)
+    })
   }, [model, renderer, pageIndex, zoom, revision])
 
   const hitTest = useCallback(
@@ -127,11 +125,14 @@ export function EditorPane({ paneId }: { paneId: string }) {
     [page, pdfToCss],
   )
 
+  const setRsvpAnchor = useApp((s) => s.setRsvpAnchor)
+
   const beginEdit = useCallback(
     (hit: Hit, override?: Granularity) => {
       const granularity = override ?? resolveGranularity(hit, editMode)
       const words = selectionWords(hit, granularity)
       const first = words[0]
+      setRsvpAnchor(hit.word)
 
       if (granularity === 'block') {
         const { block } = hit
@@ -168,7 +169,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
         multiline: false,
       })
     },
-    [editMode, startEdit, pageIndex, paneId],
+    [editMode, startEdit, pageIndex, paneId, setRsvpAnchor],
   )
 
   const copyText = useCallback(
@@ -248,7 +249,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
     <div className="h-full overflow-auto p-6">
       <div
         className="relative mx-auto border border-ink-3"
-        style={size ? { width: size.w, height: size.h } : undefined}
+        style={viewport ? { width: viewport.cssWidth, height: viewport.cssHeight } : undefined}
         onMouseMove={(e) => {
           if (!paneEditing) setHovered(hitTest(e))
         }}

@@ -49,8 +49,10 @@ export function rotatePage(
   index: number,
   deltaDegrees: number,
 ): void {
-  void model // extraction stays in unrotated user space; rendering handles /Rotate
+  // extraction stays in unrotated user space; display transforms handle /Rotate
   host.rotatePage(index, deltaDegrees)
+  const page = model.pages[index]
+  page.rotation = (((page.rotation + deltaDegrees) % 360) + 360) % 360
 }
 
 export async function insertDocumentAt(

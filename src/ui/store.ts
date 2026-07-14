@@ -84,6 +84,9 @@ interface AppState {
   exportedIndex: number
   /** A file waiting on the export/discard/cancel decision. */
   pendingOpen: { name: string; bytes: Uint8Array } | null
+  /** Last word clicked in an editor — rsvp panes jump to it. */
+  rsvpAnchor: { word: import('../model/document').Word; revision: number } | null
+  setRsvpAnchor(word: import('../model/document').Word): void
 
   layout: LayoutNode
   focusedPaneId: string | null
@@ -198,6 +201,7 @@ export const useApp = create<AppState>((set, get) => {
     historyIndex: -1,
     exportedIndex: -1,
     pendingOpen: null,
+    rsvpAnchor: null,
 
     layout: loadLayout() ?? defaultLayout(),
     focusedPaneId: null,
@@ -467,6 +471,10 @@ export const useApp = create<AppState>((set, get) => {
       } catch (err) {
         set({ busy: false, status: `export error: ${(err as Error).message}` })
       }
+    },
+
+    setRsvpAnchor(word) {
+      set((s) => ({ rsvpAnchor: { word, revision: s.revision } }))
     },
 
     setStatus(msg) {

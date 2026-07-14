@@ -36,6 +36,8 @@ export interface HostPage {
   index: number
   width: number
   height: number
+  /** Page /Rotate in degrees (0, 90, 180, 270). */
+  rotation: number
   contentBytes: Uint8Array
   fonts: RawFontData[]
 }
@@ -66,6 +68,7 @@ export class PdfHost {
       index,
       width,
       height,
+      rotation: ((page.getRotation().angle % 360) + 360) % 360,
       contentBytes: this.pageContentBytes(index),
       fonts: this.pageFonts(index),
     }

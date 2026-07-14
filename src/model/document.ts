@@ -75,6 +75,8 @@ export interface PageModel {
   /** MediaBox width/height in user units. */
   width: number
   height: number
+  /** Page /Rotate in degrees (0, 90, 180, 270). */
+  rotation: number
   blocks: Block[]
   /** Parsed operations of the (concatenated) content stream. */
   ops: Operation[]

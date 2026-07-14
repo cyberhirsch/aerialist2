@@ -2,14 +2,17 @@ import { useApp } from './store'
 
 const ROWS: [string, string][] = [
   ['click', 'edit (auto: cell / line / paragraph)'],
-  ['right-click', 'context menu'],
+  ['right-click', 'context menu (pages: organizer thumbs)'],
   ['enter / esc', 'apply / cancel edit'],
   ['ctrl+z / ctrl+y', 'undo / redo'],
   ['ctrl+o', 'open pdf'],
   ['ctrl+e', 'export pdf'],
   ['a w l p', 'mode: auto word line para'],
-  ['+ - 0', 'zoom in / out / reset'],
-  ['pgup pgdn ← →', 'previous / next page'],
+  ['+ - 0', 'zoom (editor) / speed (rsvp)'],
+  ['pgup pgdn ← →', 'pages (editor) / seek (rsvp)'],
+  ['space', 'play / pause rsvp (when focused)'],
+  ['drag pdf → organizer', 'merge at drop position'],
+  ['drag pdf → elsewhere', 'open as new document'],
   ['?', 'toggle this help'],
 ]
 

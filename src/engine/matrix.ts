@@ -33,6 +33,31 @@ export function scaleOf(m: Matrix): [number, number] {
   return [Math.hypot(m[0], m[1]), Math.hypot(m[2], m[3])]
 }
 
+/**
+ * Display transform mapping PDF user space → CSS pixels for a page of
+ * `w`×`h` user units at `scale`, honoring /Rotate (matches PDF.js
+ * viewport math for a zero-origin MediaBox).
+ */
+export function pageViewportTransform(
+  w: number,
+  h: number,
+  rotation: number,
+  scale: number,
+): { transform: Matrix; cssWidth: number; cssHeight: number } {
+  const r = ((rotation % 360) + 360) % 360
+  const s = scale
+  switch (r) {
+    case 90:
+      return { transform: [0, s, s, 0, 0, 0], cssWidth: h * s, cssHeight: w * s }
+    case 180:
+      return { transform: [-s, 0, 0, s, w * s, 0], cssWidth: w * s, cssHeight: h * s }
+    case 270:
+      return { transform: [0, -s, -s, 0, h * s, w * s], cssWidth: h * s, cssHeight: w * s }
+    default:
+      return { transform: [s, 0, 0, -s, 0, h * s], cssWidth: w * s, cssHeight: h * s }
+  }
+}
+
 /** Inverse of an affine transform (throws on singular matrices). */
 export function invert(m: Matrix): Matrix {
   const det = m[0] * m[3] - m[1] * m[2]
