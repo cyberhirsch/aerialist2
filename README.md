@@ -1,32 +1,102 @@
-# React + TypeScript + Vite
+# Aerialist2
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A browser-native PDF editor with **true text editing** — it parses and rewrites PDF content streams instead of drawing overlay text on top of the page.
 
-Currently, two official plugins are available:
+100% client-side. No backend, no uploads, no accounts. Everything runs in your browser and works offline after the first load.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Live at: https://cyberhirsch.github.io/aerialist2/
 
-## React Compiler
+## What makes this different
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Most browser-based PDF "editors" place a text box over the page and hope it looks right. Aerialist2 parses the actual PDF content stream, understands the text operators, fonts, and layout, lets you edit through a proper document model (Document → Page → Block → Line → Word → Glyph), and rewrites the content stream on export. The edit is real PDF text — selectable, searchable, and reflowing like it always belonged there.
 
-## Expanding the Oxlint configuration
+## Interface
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+A Blender-style workspace: the layout is a tree of resizable panes, and each pane's function is switchable from its own header dropdown.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+- **editor** — click a word, line, table cell, or paragraph to edit it in place. Auto mode picks the right granularity: paragraphs reflow, tables edit per cell, everything else edits per line.
+- **organizer** — a responsive thumbnail grid for the whole document. Drag to reorder pages, right-click to duplicate/rotate/delete, drop another PDF onto it to merge at that position.
+- **rsvp** — speed-reading pane fed directly from the extracted word stream, with an ORP-style pivot display.
+
+Split, close, or reassign any pane; the layout persists across reloads. Full undo/redo, keyboard shortcuts, and a right-click context menu throughout. Aesthetic is deliberately minimal: monospace, greyscale, no color accents, terminal-style chrome.
+
+## Commands
+
+```
+npm install
+npm run dev      # start the dev server
+npm run build    # typecheck (tsc -b) + production build
+npm run lint     # oxlint
+npx vitest run   # test suite
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Architecture
+
+- `src/engine/` — the differentiator, all custom TypeScript: content stream lexer/parser, text-state interpreter, font/encoding/CMap decoding, word/line/block detection, layout (wrapping), content stream rewriter. No third-party PDF logic lives here.
+- `src/model/` — the editable document model. The single API the UI talks to; wraps the engine and the pdf-lib host together.
+- `src/pdf/` — adapters over third-party libraries, kept behind the model: PDF.js for rendering, pdf-lib for document assembly (merge, split, rotate, page ops, save).
+- `src/ui/` — React components and the Zustand store, including the pane-workspace system.
+
+Full product spec: [docs/PRD.md](docs/PRD.md).
+
+## Roadmap
+
+### P0 — Core differentiator
+
+- [x] PDF parser
+- [x] Content stream parser
+- [x] Font parser
+- [x] Text extraction
+- [x] Word detection
+- [x] Line detection
+- [x] Block detection
+- [x] Editable document model
+- [x] Layout engine
+- [x] Content stream writer
+- [x] Export valid PDF
+
+### P1 — Core editing features
+
+- [x] Edit existing text
+- [x] Add text *(via edit; standalone text insertion still open)*
+- [x] Delete text
+- [x] Font editing *(fallback-font substitution; style controls still open)*
+- [ ] Images
+- [ ] Shapes
+- [ ] Highlight
+- [ ] Underline
+- [ ] Drawing
+- [ ] Sticky notes
+- [ ] Signatures
+- [ ] Fill forms
+- [ ] Search
+- [x] Page reorder
+- [x] Rotate pages
+- [x] Delete pages
+- [x] Merge PDFs
+- [ ] Split PDFs
+
+### P2 — Productivity features
+
+- [ ] Watermarks
+- [ ] Headers & footers
+- [ ] Page numbers
+- [ ] Metadata editing
+- [ ] Password protection
+- [ ] Compression
+- [ ] Backgrounds
+- [ ] Batch operations
+
+### P3 — Future
+
+- [ ] OCR
+- [ ] Scanned PDF editing
+- [ ] Form creation
+- [ ] Digital signatures
+- [ ] AI-assisted layout repair
+- [ ] DOCX export
+- [ ] Accessibility/tagged PDF editing
+
+## License
+
+[MIT](LICENSE)
