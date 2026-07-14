@@ -76,13 +76,14 @@ export function EditorPane({ paneId }: { paneId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const {
     model, renderer, revision, editing, editMode, busy,
-    history, historyIndex,
+    history, historyIndex, searchMatches, searchIndex,
     startEdit, cancelEdit, applyEdit, undo, redo, exportPdf, setStatus,
   } = useApp()
   const view = useApp((s) => s.paneViews[paneId]) ?? defaultPaneView()
   const { pageIndex, zoom } = view
   const [hovered, setHovered] = useState<Hit | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
+  const currentMatchRef = useRef<HTMLDivElement>(null)
 
   const page = model?.pages[pageIndex] ?? null
 
@@ -102,6 +103,11 @@ export function EditorPane({ paneId }: { paneId: string }) {
       console.warn('renderPage failed:', err)
     })
   }, [model, renderer, pageIndex, zoom, revision])
+
+  // keep the active search match visible when it lands on this page
+  useEffect(() => {
+    currentMatchRef.current?.scrollIntoView({ block: 'center', inline: 'center' })
+  }, [searchIndex, pageIndex])
 
   const hitTest = useCallback(
     (e: React.MouseEvent): Hit | null => {
@@ -244,6 +250,11 @@ export function EditorPane({ paneId }: { paneId: string }) {
     hoverTag = editMode === 'auto' ? (granularity === 'block' ? 'para' : granularity) : null
   }
   const editCss = paneEditing && pdfToCss ? cssRect(paneEditing.bbox, pdfToCss) : null
+  const pageMatches = pdfToCss
+    ? searchMatches
+        .map((m, i) => ({ m, i }))
+        .filter(({ m }) => m.pageIndex === pageIndex)
+    : []
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -265,6 +276,20 @@ export function EditorPane({ paneId }: { paneId: string }) {
         }}
       >
         <canvas ref={canvasRef} className="block" />
+
+        {pdfToCss &&
+          pageMatches.map(({ m, i }) => (
+            <div
+              key={i}
+              ref={i === searchIndex ? currentMatchRef : undefined}
+              className={
+                i === searchIndex
+                  ? 'pointer-events-none absolute border-2 border-ink-7 bg-ink-6/40'
+                  : 'pointer-events-none absolute border border-ink-5 bg-ink-6/15'
+              }
+              style={cssRect(m.bbox, pdfToCss)}
+            />
+          ))}
 
         {hoverCss && (
           <div

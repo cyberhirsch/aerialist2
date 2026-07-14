@@ -23,8 +23,10 @@ export function Toolbar() {
   const fileInput = useRef<HTMLInputElement>(null)
   const {
     fileName, model, busy, editMode, history, historyIndex, paneViews,
+    searchQuery, searchCaseSensitive, searchWholeWord, searchMatches, searchIndex,
     requestOpen, setPage, setZoom, setEditMode, exportPdf, undo, redo,
     toggleHelp, targetEditorPaneId,
+    setSearchQuery, setSearchCaseSensitive, setSearchWholeWord, searchNext, searchPrev, clearSearch,
   } = useApp()
 
   const editorId = targetEditorPaneId()
@@ -51,6 +53,55 @@ export function Toolbar() {
         onClick={() => void redo()}
         disabled={busy || historyIndex >= history.length - 1}
       />
+
+      <span className="text-ink-3">│</span>
+      <span className="flex items-center gap-1">
+        <input
+          id="a2-search-input"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              if (e.shiftKey) searchPrev()
+              else searchNext()
+            } else if (e.key === 'Escape') {
+              if (searchQuery) clearSearch()
+              e.currentTarget.blur()
+            }
+          }}
+          disabled={!model}
+          placeholder="find…"
+          className="w-24 border border-ink-3 bg-ink-0 px-1 text-ink-6 outline-none placeholder:text-ink-4 focus:border-ink-5 disabled:opacity-40"
+        />
+        <button
+          onClick={() => setSearchCaseSensitive(!searchCaseSensitive)}
+          disabled={!model}
+          title="case sensitive"
+          className={
+            'px-1 disabled:opacity-40 ' +
+            (searchCaseSensitive ? 'bg-ink-2 text-ink-7' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+          }
+        >
+          Aa
+        </button>
+        <button
+          onClick={() => setSearchWholeWord(!searchWholeWord)}
+          disabled={!model}
+          title="whole word"
+          className={
+            'px-1 disabled:opacity-40 ' +
+            (searchWholeWord ? 'bg-ink-2 text-ink-7' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+          }
+        >
+          "ab"
+        </button>
+        <Key label="‹" onClick={searchPrev} disabled={searchMatches.length === 0} />
+        <span className="w-14 text-center tabular-nums text-ink-5">
+          {searchQuery ? `${searchMatches.length ? searchIndex + 1 : 0}/${searchMatches.length}` : '–/–'}
+        </span>
+        <Key label="›" onClick={searchNext} disabled={searchMatches.length === 0} />
+      </span>
 
       <span className="text-ink-3">│</span>
       <span className="flex items-center text-ink-5">

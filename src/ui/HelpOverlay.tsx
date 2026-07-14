@@ -7,6 +7,7 @@ const ROWS: [string, string][] = [
   ['ctrl+z / ctrl+y', 'undo / redo'],
   ['ctrl+o', 'open pdf'],
   ['ctrl+e', 'export pdf'],
+  ['ctrl+f', 'find (enter/shift+enter: next/prev)'],
   ['a w l p', 'mode: auto word line para'],
   ['+ - 0', 'zoom (editor) / speed (rsvp)'],
   ['pgup pgdn ← →', 'pages (editor) / seek (rsvp)'],

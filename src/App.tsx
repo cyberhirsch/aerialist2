@@ -56,6 +56,11 @@ export default function App() {
       } else if (ctrl && ['e', 's'].includes(e.key.toLowerCase())) {
         e.preventDefault()
         void s.exportPdf()
+      } else if (ctrl && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        const input = document.getElementById('a2-search-input') as HTMLInputElement | null
+        input?.focus()
+        input?.select()
       } else if (ctrl) {
         // leave other ctrl combos (browser zoom etc.) alone
       } else if (e.key === ' ' && rsvpFocused) {

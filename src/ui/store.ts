@@ -17,6 +17,7 @@ import {
   movePage,
   rotatePage,
 } from '../model/pageOps'
+import { findMatches, type SearchMatch } from '../model/search'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
 import {
@@ -88,6 +89,19 @@ interface AppState {
   rsvpAnchor: { word: import('../model/document').Word; revision: number } | null
   setRsvpAnchor(word: import('../model/document').Word): void
 
+  searchQuery: string
+  searchCaseSensitive: boolean
+  searchWholeWord: boolean
+  searchMatches: SearchMatch[]
+  /** Index into searchMatches of the current match; -1 if none. */
+  searchIndex: number
+  setSearchQuery(query: string): void
+  setSearchCaseSensitive(v: boolean): void
+  setSearchWholeWord(v: boolean): void
+  searchNext(): void
+  searchPrev(): void
+  clearSearch(): void
+
   layout: LayoutNode
   focusedPaneId: string | null
   paneViews: Record<string, PaneView>
@@ -149,6 +163,7 @@ export const useApp = create<AppState>((set, get) => {
         revision: s.revision + 1,
         status: `${verb} (${nextIndex + 1}/${history.length} states)`,
       }))
+      refreshSearch()
     } catch (err) {
       set({ busy: false, status: `error: ${(err as Error).message}` })
     }
@@ -157,6 +172,31 @@ export const useApp = create<AppState>((set, get) => {
   const persistLayout = (layout: LayoutNode) => {
     saveLayout(layout)
     return layout
+  }
+
+  const runSearch = (query: string, caseSensitive: boolean, wholeWord: boolean): SearchMatch[] => {
+    const { model } = get()
+    if (!model || !query.trim()) return []
+    return findMatches(model, query, { caseSensitive, wholeWord })
+  }
+
+  /** Move the target editor pane to a match's page. */
+  const jumpToMatch = (index: number) => {
+    const match = get().searchMatches[index]
+    if (!match) return
+    const editorId = get().targetEditorPaneId()
+    if (editorId) get().setPage(editorId, match.pageIndex)
+  }
+
+  /** Re-run the active search after the document changes underneath it. */
+  const refreshSearch = () => {
+    const { searchQuery, searchCaseSensitive, searchWholeWord, searchIndex } = get()
+    if (!searchQuery) return
+    const matches = runSearch(searchQuery, searchCaseSensitive, searchWholeWord)
+    set({
+      searchMatches: matches,
+      searchIndex: matches.length ? Math.min(searchIndex, matches.length - 1) : -1,
+    })
   }
 
   /** Run a structural page op, then snapshot + re-render + announce. */
@@ -181,6 +221,7 @@ export const useApp = create<AppState>((set, get) => {
           status: message,
         }
       })
+      refreshSearch()
     } catch (err) {
       set({ busy: false, status: `error: ${(err as Error).message}` })
     }
@@ -202,6 +243,12 @@ export const useApp = create<AppState>((set, get) => {
     exportedIndex: -1,
     pendingOpen: null,
     rsvpAnchor: null,
+
+    searchQuery: '',
+    searchCaseSensitive: false,
+    searchWholeWord: false,
+    searchMatches: [],
+    searchIndex: -1,
 
     layout: loadLayout() ?? defaultLayout(),
     focusedPaneId: null,
@@ -360,6 +407,9 @@ export const useApp = create<AppState>((set, get) => {
           historyIndex: 0,
           exportedIndex: 0,
           paneViews: resetViews(s.paneViews),
+          searchQuery: '',
+          searchMatches: [],
+          searchIndex: -1,
           status: `${name} — ${model.pages.length} page(s), ${words} words detected. click a word to edit; ? for shortcuts.`,
         }))
       } catch (err) {
@@ -437,6 +487,7 @@ export const useApp = create<AppState>((set, get) => {
             status: `"${summary}" replaced — content stream rewritten${notes.length ? ` (${notes.join(', ')})` : ''}`,
           }
         })
+        refreshSearch()
       } catch (err) {
         set({ busy: false, editing: null, status: `error: ${(err as Error).message}` })
       }
@@ -475,6 +526,47 @@ export const useApp = create<AppState>((set, get) => {
 
     setRsvpAnchor(word) {
       set((s) => ({ rsvpAnchor: { word, revision: s.revision } }))
+    },
+
+    setSearchQuery(query) {
+      const { searchCaseSensitive, searchWholeWord } = get()
+      const matches = runSearch(query, searchCaseSensitive, searchWholeWord)
+      set({ searchQuery: query, searchMatches: matches, searchIndex: matches.length ? 0 : -1 })
+      if (matches.length) jumpToMatch(0)
+    },
+
+    setSearchCaseSensitive(v) {
+      const { searchQuery, searchWholeWord } = get()
+      const matches = runSearch(searchQuery, v, searchWholeWord)
+      set({ searchCaseSensitive: v, searchMatches: matches, searchIndex: matches.length ? 0 : -1 })
+      if (matches.length) jumpToMatch(0)
+    },
+
+    setSearchWholeWord(v) {
+      const { searchQuery, searchCaseSensitive } = get()
+      const matches = runSearch(searchQuery, searchCaseSensitive, v)
+      set({ searchWholeWord: v, searchMatches: matches, searchIndex: matches.length ? 0 : -1 })
+      if (matches.length) jumpToMatch(0)
+    },
+
+    searchNext() {
+      const { searchMatches, searchIndex } = get()
+      if (!searchMatches.length) return
+      const next = (searchIndex + 1) % searchMatches.length
+      set({ searchIndex: next })
+      jumpToMatch(next)
+    },
+
+    searchPrev() {
+      const { searchMatches, searchIndex } = get()
+      if (!searchMatches.length) return
+      const prev = (searchIndex - 1 + searchMatches.length) % searchMatches.length
+      set({ searchIndex: prev })
+      jumpToMatch(prev)
+    },
+
+    clearSearch() {
+      set({ searchQuery: '', searchMatches: [], searchIndex: -1 })
     },
 
     setStatus(msg) {
