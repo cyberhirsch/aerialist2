@@ -14,19 +14,21 @@ export function OrganizerPane({ paneId }: { paneId: string }) {
     setPage, targetEditorPaneId, movePageAction, mergeDocumentAt,
     deletePageAction, duplicatePageAction, rotatePageAction,
   } = useApp()
-  const boxRef = useRef<HTMLDivElement>(null)
+  // callback-ref + state: the grid container mounts conditionally (only
+  // once a document exists), so a mount-once effect would miss it
+  const [box, setBox] = useState<HTMLDivElement | null>(null)
+  const boxRef = useRef<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
   const [insertAt, setInsertAt] = useState<number | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; page: number } | null>(null)
 
   useEffect(() => {
-    const box = boxRef.current
     if (!box) return
     const ro = new ResizeObserver(() => setWidth(box.clientWidth))
     ro.observe(box)
     setWidth(box.clientWidth)
     return () => ro.disconnect()
-  }, [])
+  }, [box])
 
   const inner = Math.max(0, width - 2 * PAD)
   const cols = Math.max(1, Math.floor((inner + GAP) / (MIN_THUMB + GAP)))
@@ -101,7 +103,10 @@ export function OrganizerPane({ paneId }: { paneId: string }) {
 
   return (
     <div
-      ref={boxRef}
+      ref={(node) => {
+        boxRef.current = node
+        setBox(node)
+      }}
       className="h-full overflow-y-auto"
       style={{ padding: PAD }}
       onDragOver={(e) => {
@@ -162,27 +167,45 @@ function Thumb({ index, width, aspect, showInsertBar, onClick, onContextMenu }: 
   const renderer = useApp((s) => s.renderer)
   const [rendered, setRendered] = useState(false)
 
-  // render lazily, when the thumbnail scrolls into view
+  // render lazily: right away if the thumb is already in view, else
+  // when it scrolls into view
   useEffect(() => {
     const holder = holderRef.current
     const canvas = canvasRef.current
     if (!holder || !canvas || width < 10) return
     setRendered(false)
     let cancelled = false
-    const io = new IntersectionObserver((entries) => {
-      if (!entries.some((e) => e.isIntersecting)) return
-      io.disconnect()
+    let io: IntersectionObserver | null = null
+
+    const render = () => {
       renderer
         .renderThumb(index, canvas, width - 2)
         .then(() => {
           if (!cancelled) setRendered(true)
         })
-        .catch(() => {})
-    })
-    io.observe(holder)
+        .catch((err: unknown) => {
+          console.warn(`renderThumb(${index}) failed:`, err)
+        })
+    }
+
+    const rect = holder.getBoundingClientRect()
+    const inView =
+      rect.bottom > 0 && rect.top < window.innerHeight &&
+      rect.right > 0 && rect.left < window.innerWidth
+    if (inView) {
+      render()
+    } else {
+      io = new IntersectionObserver((entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return
+        io?.disconnect()
+        render()
+      })
+      io.observe(holder)
+    }
+
     return () => {
       cancelled = true
-      io.disconnect()
+      io?.disconnect()
     }
   }, [renderer, index, width])
 
