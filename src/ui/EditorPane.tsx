@@ -58,14 +58,14 @@ const EDITOR_PAD = 24
 export function EditorPane({ paneId }: { paneId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const {
-    model, renderer, revision, editing, editMode, busy, placement,
+    model, renderer, revision, editing, busy, placement,
     history, historyIndex, searchMatches, searchIndex,
     commentPlacementActive, openCommentEditor,
     startEdit, cancelEdit, applyEdit, undo, redo, exportPdf, setStatus, setPage,
     updatePaneView,
   } = useApp()
   const view = useApp((s) => s.paneViews[paneId]) ?? defaultPaneView()
-  const { pageIndex, zoom, fitMode } = view
+  const { pageIndex, zoom, fitMode, editMode } = view
   const [hovered, setHovered] = useState<Hit | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
   const currentMatchRef = useRef<HTMLDivElement>(null)

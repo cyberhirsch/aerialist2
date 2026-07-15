@@ -72,6 +72,8 @@ export interface PaneView {
    * to null (see setZoom).
    */
   fitMode: FitMode
+  /** Edit granularity for this pane's click-to-edit — independent per pane. */
+  editMode: EditMode
   /** rsvp */
   wpm: number
   playing: boolean
@@ -109,6 +111,7 @@ export const defaultPaneView = (): PaneView => ({
   pageIndex: 0,
   zoom: 1.25,
   fitMode: null,
+  editMode: 'auto',
   wpm: 300,
   playing: false,
   wordPos: 0,
@@ -122,7 +125,6 @@ interface AppState {
   revision: number
   status: string
   editing: EditingState | null
-  editMode: EditMode
   busy: boolean
   helpOpen: boolean
   /** Saved document snapshots; historyIndex points at the current one. */
@@ -219,7 +221,7 @@ interface AppState {
   setPage(paneId: string, index: number): void
   setZoom(paneId: string, zoom: number): void
   setFitMode(paneId: string, mode: FitMode): void
-  setEditMode(mode: EditMode): void
+  setEditMode(paneId: string, mode: EditMode): void
   startEdit(editing: Omit<EditingState, 'pageIndex'> & { pageIndex: number }): void
   cancelEdit(): void
   applyEdit(newText: string): Promise<void>
@@ -385,7 +387,6 @@ export const useApp = create<AppState>((set, get) => {
     revision: 0,
     status: 'open a pdf to begin',
     editing: null,
-    editMode: 'auto',
     busy: false,
     helpOpen: false,
     history: [],
@@ -797,8 +798,9 @@ export const useApp = create<AppState>((set, get) => {
       get().updatePaneView(paneId, { fitMode: mode })
     },
 
-    setEditMode(mode) {
-      set({ editMode: mode, editing: null })
+    setEditMode(paneId, mode) {
+      get().updatePaneView(paneId, { editMode: mode })
+      set((s) => ({ editing: s.editing?.paneId === paneId ? null : s.editing }))
     },
 
     startEdit(editing) {

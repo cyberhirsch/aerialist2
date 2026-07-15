@@ -87,7 +87,6 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
   const focusedPaneId = useApp((s) => s.focusedPaneId)
   const model = useApp((s) => s.model)
   const busy = useApp((s) => s.busy)
-  const editMode = useApp((s) => s.editMode)
   const commentPlacementActive = useApp((s) => s.commentPlacementActive)
   const view = useApp((s) => s.paneViews[pane.id])
   const {
@@ -96,7 +95,7 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
   } = useApp()
   const focused = focusedPaneId === pane.id
   const isOnlyPane = layout.type === 'pane'
-  const { pageIndex, zoom, fitMode } = view ?? { pageIndex: 0, zoom: 1, fitMode: null }
+  const { pageIndex, zoom, fitMode, editMode } = view ?? { pageIndex: 0, zoom: 1, fitMode: null, editMode: 'auto' }
 
   const modeMenuBtn = useRef<HTMLButtonElement>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
@@ -104,7 +103,7 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
   const [fillToolOpen, setFillToolOpen] = useState(false)
   const modeMenuItems: MenuItem[] = EDIT_MODES.map((m) => ({
     label: `${m === editMode ? '› ' : '  '}${EDIT_MODE_LABEL[m]}`,
-    action: () => setEditMode(m),
+    action: () => setEditMode(pane.id, m),
   }))
   const modeMenuPos = modeMenuBtn.current?.getBoundingClientRect()
   const navDisabled = !model

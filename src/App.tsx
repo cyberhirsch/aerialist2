@@ -98,13 +98,13 @@ export default function App() {
           s.setPage(editorId, view.pageIndex - 1)
         }
       } else if (e.key === 'a') {
-        s.setEditMode('auto')
+        if (editorId) s.setEditMode(editorId, 'auto')
       } else if (e.key === 'w') {
-        s.setEditMode('word')
+        if (editorId) s.setEditMode(editorId, 'word')
       } else if (e.key === 'l') {
-        s.setEditMode('line')
+        if (editorId) s.setEditMode(editorId, 'line')
       } else if (e.key === 'p') {
-        s.setEditMode('block')
+        if (editorId) s.setEditMode(editorId, 'block')
       } else if (e.key === '?') {
         s.toggleHelp()
       } else if (e.key === 'Escape' && s.helpOpen) {
