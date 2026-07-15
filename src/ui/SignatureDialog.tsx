@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Icon } from './icons'
 import { dataUrlToBytes, rasterizeToPng, renderTextSignature } from './imageUtils'
 import { useApp } from './store'
 import type { SignatureKind } from './signatureLibrary'
@@ -157,8 +158,8 @@ export function SignatureDialog() {
       >
         <div className="mb-3 flex items-center justify-between">
           <span className="text-ink-7">── signature ──</span>
-          <button onClick={insertDateStamp} className="text-ink-4 hover:text-ink-6">
-            [ insert date stamp ]
+          <button onClick={insertDateStamp} className="text-ink-4 hover:text-ink-6" title="insert date stamp">
+            <Icon name="edit" size={14} />
           </button>
         </div>
 
@@ -183,8 +184,8 @@ export function SignatureDialog() {
             />
             <div className="mt-1 flex justify-between text-ink-4">
               <span>draw with mouse or touch</span>
-              <button onClick={clearDraw} className="hover:text-ink-6">
-                [ clear ]
+              <button onClick={clearDraw} className="hover:text-ink-6" title="clear">
+                <Icon name="close" size={14} />
               </button>
             </div>
           </div>
@@ -289,16 +290,18 @@ export function SignatureDialog() {
           <button
             onClick={closeSignatureDialog}
             className="border border-ink-3 px-3 py-0.5 text-ink-6 hover:bg-ink-2"
+            title="cancel"
           >
-            [ cancel ]
+            <Icon name="close" size={14} />
           </button>
           {tab !== 'saved' && (
             <button
               onClick={confirm}
               disabled={!asset}
               className="border border-ink-3 px-3 py-0.5 text-ink-6 hover:bg-ink-2 disabled:opacity-40"
+              title="place on page"
             >
-              [ place on page ]
+              <Icon name="sign" size={14} />
             </button>
           )}
         </div>

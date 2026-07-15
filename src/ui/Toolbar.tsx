@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { Icon } from './icons'
 import { defaultPaneView, useApp } from './store'
 
 function Key({ label, onClick, disabled }: {
@@ -80,28 +81,42 @@ export function Toolbar() {
           disabled={!model}
           title="case sensitive"
           className={
-            'px-1 disabled:opacity-40 ' +
-            (searchCaseSensitive ? 'bg-ink-2 text-ink-7' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+            'px-1 disabled:opacity-40 text-ink-5 ' +
+            (searchCaseSensitive ? 'bg-ink-2 text-ink-7' : 'hover:bg-ink-2 hover:text-ink-6')
           }
         >
-          Aa
+          <Icon name="find" size={14} />
         </button>
         <button
           onClick={() => setSearchWholeWord(!searchWholeWord)}
           disabled={!model}
           title="whole word"
           className={
-            'px-1 disabled:opacity-40 ' +
-            (searchWholeWord ? 'bg-ink-2 text-ink-7' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+            'px-1 disabled:opacity-40 text-ink-5 ' +
+            (searchWholeWord ? 'bg-ink-2 text-ink-7' : 'hover:bg-ink-2 hover:text-ink-6')
           }
         >
-          "ab"
+          <Icon name="find" size={14} />
         </button>
-        <Key label="‹" onClick={searchPrev} disabled={searchMatches.length === 0} />
+        <button
+          onClick={searchPrev}
+          disabled={searchMatches.length === 0}
+          title="previous match"
+          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Icon name="page-prev" size={14} />
+        </button>
         <span className="w-14 text-center tabular-nums text-ink-5">
           {searchQuery ? `${searchMatches.length ? searchIndex + 1 : 0}/${searchMatches.length}` : '–/–'}
         </span>
-        <Key label="›" onClick={searchNext} disabled={searchMatches.length === 0} />
+        <button
+          onClick={searchNext}
+          disabled={searchMatches.length === 0}
+          title="next match"
+          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Icon name="page-next" size={14} />
+        </button>
       </span>
 
       <span className="text-ink-3">│</span>
@@ -133,38 +148,56 @@ export function Toolbar() {
       </span>
 
       <span className="flex items-center gap-1 text-ink-5">
-        <Key
-          label="‹"
+        <button
           onClick={() => editorId && view && setPage(editorId, view.pageIndex - 1)}
           disabled={navDisabled || (view?.pageIndex ?? 0) === 0}
-        />
+          title="previous page"
+          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Icon name="page-prev" size={14} />
+        </button>
         <span className="tabular-nums">
           {model && view ? `${view.pageIndex + 1}/${model.pages.length}` : '–/–'}
         </span>
-        <Key
-          label="›"
+        <button
           onClick={() => editorId && view && setPage(editorId, view.pageIndex + 1)}
           disabled={navDisabled || (view?.pageIndex ?? 0) >= (model?.pages.length ?? 1) - 1}
-        />
+          title="next page"
+          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Icon name="page-next" size={14} />
+        </button>
       </span>
 
       <span className="flex items-center gap-1 text-ink-5">
-        <Key
-          label="−"
+        <button
           onClick={() => editorId && view && setZoom(editorId, view.zoom - 0.25)}
           disabled={navDisabled}
-        />
+          title="zoom out"
+          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Icon name="zoom-out" size={14} />
+        </button>
         <span className="w-12 text-center tabular-nums">
           {view ? `${Math.round(view.zoom * 100)}%` : '–'}
         </span>
-        <Key
-          label="+"
+        <button
           onClick={() => editorId && view && setZoom(editorId, view.zoom + 0.25)}
           disabled={navDisabled}
-        />
+          title="zoom in"
+          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Icon name="zoom-in" size={14} />
+        </button>
       </span>
 
-      <Key label="[?]" onClick={toggleHelp} />
+      <button
+        onClick={toggleHelp}
+        title="help"
+        className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6"
+      >
+        <Icon name="help" size={14} />
+      </button>
 
       <input
         id="a2-file-input"

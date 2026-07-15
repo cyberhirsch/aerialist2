@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { applyDelta, invert, rectToCssBox, type Matrix } from '../engine/matrix'
+import { Icon } from './icons'
 import { useApp } from './store'
 
 /**
@@ -80,14 +81,16 @@ export function SignaturePlacer({ paneId, pdfToCss }: { paneId: string; pdfToCss
           onClick={() => void confirmPlacement()}
           disabled={busy}
           className="border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2 disabled:opacity-40"
+          title="place"
         >
-          [ place ]
+          <Icon name="sign" size={14} />
         </button>
         <button
           onClick={cancelPlacement}
           className="border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2"
+          title="cancel"
         >
-          [ cancel ]
+          <Icon name="close" size={14} />
         </button>
       </div>
     </>

@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { EditorPane } from './EditorPane'
+import { Icon } from './icons'
 import { OrganizerPane } from './OrganizerPane'
 import { RsvpPane } from './RsvpPane'
 import { useApp } from './store'
@@ -103,14 +104,14 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
           onClick={() => splitPaneAction(pane.id, 'row')}
           className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6"
         >
-          ││
+          <Icon name="split-row" size={14} />
         </button>
         <button
           title="split stacked"
           onClick={() => splitPaneAction(pane.id, 'col')}
           className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6"
         >
-          ══
+          <Icon name="split-col" size={14} />
         </button>
         <button
           title="close pane"
@@ -118,7 +119,7 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
           disabled={isOnlyPane}
           className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
         >
-          ×
+          <Icon name="close" size={14} />
         </button>
       </header>
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
