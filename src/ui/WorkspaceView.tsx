@@ -88,10 +88,12 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
   const model = useApp((s) => s.model)
   const busy = useApp((s) => s.busy)
   const commentPlacementActive = useApp((s) => s.commentPlacementActive)
+  const redactPlacementActive = useApp((s) => s.redactPlacementActive)
   const view = useApp((s) => s.paneViews[pane.id])
   const {
     focusPane, splitPaneAction, closePaneAction, setPaneKindAction, layout,
-    setEditMode, openSignatureDialog, openFillDialog, startPlacingComment, setFitMode, setPage, setZoom,
+    setEditMode, openSignatureDialog, openFillDialog, startPlacingComment,
+    startRedaction, cancelRedaction, setFitMode, setPage, setZoom,
   } = useApp()
   const focused = focusedPaneId === pane.id
   const isOnlyPane = layout.type === 'pane'
@@ -208,9 +210,13 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
             </button>
 
             <button
-              disabled
-              title="redact — coming soon (tracked separately; a fake overlay isn't real redaction)"
-              className="px-1 text-ink-4 opacity-30"
+              onClick={() => (redactPlacementActive ? cancelRedaction() : startRedaction())}
+              disabled={!model || busy}
+              title="redact — drag a box; text under it is removed from the file and the area is covered"
+              className={
+                'px-1 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30 ' +
+                (redactPlacementActive ? 'bg-ink-2 text-ink-6' : 'text-ink-4')
+              }
             >
               <Icon name="visibility-off" size={14} />
             </button>

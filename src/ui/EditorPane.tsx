@@ -61,6 +61,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
     model, renderer, revision, editing, busy, placement,
     history, historyIndex, searchMatches, searchIndex,
     commentPlacementActive, openCommentEditor,
+    redactPlacementActive, redactRegionAction,
     startEdit, cancelEdit, applyEdit, undo, redo, exportPdf, setStatus, setPage,
     updatePaneView,
   } = useApp()
@@ -68,6 +69,8 @@ export function EditorPane({ paneId }: { paneId: string }) {
   const { pageIndex, zoom, fitMode, editMode } = view
   const [hovered, setHovered] = useState<Hit | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
+  /** In-progress redaction rubber-band, in CSS coords over the page. */
+  const [redactBox, setRedactBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const currentMatchRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const lastPageFlipRef = useRef(0)
@@ -164,6 +167,32 @@ export function EditorPane({ paneId }: { paneId: string }) {
     [pdfToCss],
   )
 
+  /** CSS point relative to the page element's top-left. */
+  const cssPoint = useCallback((e: React.MouseEvent): { x: number; y: number } => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }, [])
+
+  /** Finish a redaction drag: map the CSS box to user space and apply. */
+  const finishRedaction = useCallback(
+    (box: { x0: number; y0: number; x1: number; y1: number }) => {
+      if (!pdfToCss) return
+      const inv = invert(pdfToCss)
+      const [ax, ay] = apply(inv, box.x0, box.y0)
+      const [bx, by] = apply(inv, box.x1, box.y1)
+      const rect = {
+        x: Math.min(ax, bx),
+        y: Math.min(ay, by),
+        w: Math.abs(bx - ax),
+        h: Math.abs(by - ay),
+      }
+      // ignore stray clicks / hairline drags
+      if (rect.w < 2 || rect.h < 2) return
+      void redactRegionAction(pageIndex, rect)
+    },
+    [pdfToCss, pageIndex, redactRegionAction],
+  )
+
   /**
    * Scrolling past the bottom edge advances to the next page (and
    * resets scroll to the top); past the top edge goes to the previous
@@ -172,7 +201,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
    */
   const onWheel = useCallback(
     (e: React.WheelEvent<HTMLDivElement>) => {
-      if (busy || placement || commentPlacementActive) return
+      if (busy || placement || commentPlacementActive || redactPlacementActive) return
       if (editing && editing.paneId === paneId) return
       const el = scrollRef.current
       if (!el || !model) return
@@ -195,7 +224,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
         el.scrollTop = Number.MAX_SAFE_INTEGER
       }
     },
-    [busy, placement, commentPlacementActive, editing, paneId, model, pageIndex, setPage],
+    [busy, placement, commentPlacementActive, redactPlacementActive, editing, paneId, model, pageIndex, setPage],
   )
 
   const setRsvpAnchor = useApp((s) => s.setRsvpAnchor)
@@ -333,15 +362,34 @@ export function EditorPane({ paneId }: { paneId: string }) {
       <div
         className={
           'relative mx-auto border border-ink-3' +
-          (commentPlacementActive ? ' cursor-crosshair' : '')
+          (commentPlacementActive || redactPlacementActive ? ' cursor-crosshair' : '')
         }
         style={viewport ? { width: viewport.cssWidth, height: viewport.cssHeight } : undefined}
-        onMouseMove={(e) => {
-          if (!paneEditing && !commentPlacementActive) setHovered(hitTest(e))
+        onMouseDown={(e) => {
+          if (busy || !redactPlacementActive) return
+          const p = cssPoint(e)
+          setRedactBox({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
         }}
-        onMouseLeave={() => setHovered(null)}
+        onMouseMove={(e) => {
+          if (redactBox) {
+            const p = cssPoint(e)
+            setRedactBox((b) => (b ? { ...b, x1: p.x, y1: p.y } : b))
+            return
+          }
+          if (!paneEditing && !commentPlacementActive && !redactPlacementActive) setHovered(hitTest(e))
+        }}
+        onMouseUp={() => {
+          if (!redactBox) return
+          const box = redactBox
+          setRedactBox(null)
+          finishRedaction(box)
+        }}
+        onMouseLeave={() => {
+          setHovered(null)
+          setRedactBox(null)
+        }}
         onClick={(e) => {
-          if (busy) return
+          if (busy || redactPlacementActive) return
           if (commentPlacementActive) {
             const point = hitPoint(e)
             if (point) openCommentEditor(paneId, pageIndex, point)
@@ -352,7 +400,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
         }}
         onContextMenu={(e) => {
           e.preventDefault()
-          if (commentPlacementActive) return
+          if (commentPlacementActive || redactPlacementActive) return
           setMenu({ x: e.clientX, y: e.clientY, hit: hitTest(e) })
         }}
       >
@@ -394,6 +442,18 @@ export function EditorPane({ paneId }: { paneId: string }) {
               </span>
             )}
           </div>
+        )}
+
+        {redactBox && (
+          <div
+            className="pointer-events-none absolute border border-ink-7 bg-ink-7/60"
+            style={{
+              left: Math.min(redactBox.x0, redactBox.x1),
+              top: Math.min(redactBox.y0, redactBox.y1),
+              width: Math.abs(redactBox.x1 - redactBox.x0),
+              height: Math.abs(redactBox.y1 - redactBox.y0),
+            }}
+          />
         )}
 
         {paneEditing && editCss && (

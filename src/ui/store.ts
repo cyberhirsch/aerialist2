@@ -22,6 +22,7 @@ import { setFormFieldValue } from '../model/formOps'
 import { findMatches, type SearchMatch } from '../model/search'
 import { placeImage } from '../model/signatureOps'
 import { placeText } from '../model/textOps'
+import { redactRegion } from '../model/redactOps'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
 import { renderTextSignature } from './imageUtils'
@@ -207,6 +208,12 @@ interface AppState {
   commentEditor: CommentEditorState | null
   startPlacingComment(): void
   cancelPlacingComment(): void
+
+  /** Redaction: drag a box in the editor to remove content under it. */
+  redactPlacementActive: boolean
+  startRedaction(): void
+  cancelRedaction(): void
+  redactRegionAction(pageIndex: number, rect: Rect): Promise<void>
   openCommentEditor(
     paneId: string,
     pageIndex: number,
@@ -401,6 +408,7 @@ export const useApp = create<AppState>((set, get) => {
     fillDialogOpen: false,
     commentPlacementActive: false,
     commentEditor: null,
+    redactPlacementActive: false,
 
     searchQuery: '',
     searchCaseSensitive: false,
@@ -615,11 +623,27 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     startPlacingComment() {
-      set({ commentPlacementActive: true })
+      set({ commentPlacementActive: true, redactPlacementActive: false })
     },
 
     cancelPlacingComment() {
       set({ commentPlacementActive: false })
+    },
+
+    startRedaction() {
+      set({ redactPlacementActive: true, commentPlacementActive: false })
+    },
+
+    cancelRedaction() {
+      set({ redactPlacementActive: false })
+    },
+
+    async redactRegionAction(pageIndex, rect) {
+      await commitStructural(() => {
+        const { removedGlyphs } = redactRegion(get().host!, get().model!, pageIndex, rect)
+        return `redacted region on page ${pageIndex + 1} — ${removedGlyphs} character(s) removed, area covered`
+      })
+      set({ redactPlacementActive: false })
     },
 
     openCommentEditor(paneId, pageIndex, point, existing) {

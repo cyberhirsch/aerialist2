@@ -119,6 +119,8 @@ export default function App() {
         s.closeCommentEditor()
       } else if (e.key === 'Escape' && s.commentPlacementActive) {
         s.cancelPlacingComment()
+      } else if (e.key === 'Escape' && s.redactPlacementActive) {
+        s.cancelRedaction()
       } else if (e.key === 'Escape' && s.selectedPages.size > 0) {
         s.clearSelection()
       }
