@@ -125,7 +125,7 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
         >
           {PANE_KINDS.map((k) => (
             <option key={k.kind} value={k.kind}>
-              {k.label} ▾
+              {k.label}
             </option>
           ))}
         </select>
@@ -328,7 +328,7 @@ function PaneBody({ pane }: { pane: PaneNode }) {
   switch (pane.kind) {
     case 'editor':
       return <EditorPane paneId={pane.id} />
-    case 'organizer':
+    case 'pages':
       return <OrganizerPane paneId={pane.id} />
     case 'rsvp':
       return <RsvpPane paneId={pane.id} />

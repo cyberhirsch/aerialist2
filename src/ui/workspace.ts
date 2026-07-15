@@ -3,11 +3,11 @@
  * panes. Each pane has a kind (its "editor type") switchable at runtime.
  */
 
-export type PaneKind = 'editor' | 'organizer' | 'rsvp'
+export type PaneKind = 'editor' | 'pages' | 'rsvp'
 
 export const PANE_KINDS: { kind: PaneKind; label: string }[] = [
   { kind: 'editor', label: 'editor' },
-  { kind: 'organizer', label: 'organizer' },
+  { kind: 'pages', label: 'pages' },
   { kind: 'rsvp', label: 'rsvp' },
 ]
 
@@ -42,7 +42,7 @@ export function defaultLayout(): LayoutNode {
     id: paneId(),
     dir: 'row',
     ratio: 0.22,
-    a: pane('organizer'),
+    a: pane('pages'),
     b: {
       type: 'split',
       id: paneId(),

@@ -129,7 +129,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // drops outside the organizer open the file as the new document
+  // drops outside the pages pane open the file as the new document
   const onDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault()

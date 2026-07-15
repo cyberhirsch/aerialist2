@@ -152,7 +152,7 @@ interface AppState {
   searchPrev(): void
   clearSearch(): void
 
-  /** Multi-selected page indices in the organizer. */
+  /** Multi-selected page indices in the pages pane. */
   selectedPages: Set<number>
   toggleSelectPage(index: number): void
   selectRangeTo(index: number): void
@@ -258,7 +258,7 @@ function downloadBytes(bytes: Uint8Array, filename: string): void {
 }
 
 export const useApp = create<AppState>((set, get) => {
-  /** Anchor for shift-click range selection in the organizer. */
+  /** Anchor for shift-click range selection in the pages pane. */
   let selectionAnchor: number | null = null
 
   /** Move historyIndex by `dir` and restore that document snapshot. */
