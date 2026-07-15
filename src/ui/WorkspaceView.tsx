@@ -1,12 +1,20 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 import { EditorPane } from './EditorPane'
 import { Icon } from './icons'
 import { OrganizerPane } from './OrganizerPane'
 import { RsvpPane } from './RsvpPane'
-import { useApp } from './store'
+import { useApp, type EditMode } from './store'
 import { PANE_KINDS, type LayoutNode, type PaneKind, type PaneNode, type SplitNode } from './workspace'
 
 const EDIT_MODES = ['auto', 'word', 'line', 'block'] as const
+const EDIT_MODE_LABEL: Record<EditMode, string> = { auto: 'auto', word: 'word', line: 'line', block: 'para' }
+const EDIT_MODE_TITLE: Record<EditMode, string> = {
+  auto: 'auto: paragraphs reflow, tables edit per cell, other text per line',
+  word: 'edit granularity: word',
+  line: 'edit granularity: line',
+  block: 'edit granularity: paragraph',
+}
 
 export function WorkspaceView() {
   const layout = useApp((s) => s.layout)
@@ -81,13 +89,25 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
   const busy = useApp((s) => s.busy)
   const editMode = useApp((s) => s.editMode)
   const commentPlacementActive = useApp((s) => s.commentPlacementActive)
-  const fitMode = useApp((s) => s.paneViews[pane.id]?.fitMode ?? null)
+  const view = useApp((s) => s.paneViews[pane.id])
   const {
     focusPane, splitPaneAction, closePaneAction, setPaneKindAction, layout,
-    setEditMode, openSignatureDialog, openFillDialog, startPlacingComment, setFitMode,
+    setEditMode, openSignatureDialog, openFillDialog, startPlacingComment, setFitMode, setPage, setZoom,
   } = useApp()
   const focused = focusedPaneId === pane.id
   const isOnlyPane = layout.type === 'pane'
+  const { pageIndex, zoom, fitMode } = view ?? { pageIndex: 0, zoom: 1, fitMode: null }
+
+  const modeMenuBtn = useRef<HTMLButtonElement>(null)
+  const [modeMenuOpen, setModeMenuOpen] = useState(false)
+  const [editToolOpen, setEditToolOpen] = useState(false)
+  const [fillToolOpen, setFillToolOpen] = useState(false)
+  const modeMenuItems: MenuItem[] = EDIT_MODES.map((m) => ({
+    label: `${m === editMode ? '› ' : '  '}${EDIT_MODE_LABEL[m]}`,
+    action: () => setEditMode(m),
+  }))
+  const modeMenuPos = modeMenuBtn.current?.getBoundingClientRect()
+  const navDisabled = !model
 
   return (
     <section
@@ -111,22 +131,71 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
         {pane.kind === 'editor' && (
           <>
             <span className="mx-1 text-ink-3">│</span>
+
+            {/* edit: granularity picker only shows while this tool is enabled */}
             <button
-              onClick={openSignatureDialog}
-              disabled={!model || busy}
-              title="sign"
-              className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
-            >
-              <Icon name="sign" size={14} />
-            </button>
-            <button
-              onClick={openFillDialog}
-              disabled={!model || busy}
-              title="fill — place text anywhere on the page"
-              className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
+              onClick={() => setEditToolOpen((v) => !v)}
+              disabled={!model}
+              title="edit"
+              className={
+                'px-1 disabled:opacity-30 ' +
+                (editToolOpen ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+              }
             >
               <Icon name="edit" size={14} />
             </button>
+            {editToolOpen && (
+              <>
+                <button
+                  ref={modeMenuBtn}
+                  onClick={() => setModeMenuOpen((v) => !v)}
+                  disabled={!model}
+                  title={EDIT_MODE_TITLE[editMode]}
+                  className={
+                    'px-1.5 text-xs disabled:opacity-30 ' +
+                    (modeMenuOpen ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+                  }
+                >
+                  {EDIT_MODE_LABEL[editMode]} ▾
+                </button>
+                {modeMenuOpen && modeMenuPos && (
+                  <ContextMenu
+                    x={modeMenuPos.left}
+                    y={modeMenuPos.bottom + 2}
+                    items={modeMenuItems}
+                    onClose={() => setModeMenuOpen(false)}
+                  />
+                )}
+              </>
+            )}
+
+            {/* fill: sign is a sub-option that only shows while this tool is enabled */}
+            <button
+              onClick={() => {
+                const next = !fillToolOpen
+                setFillToolOpen(next)
+                if (next) openFillDialog()
+              }}
+              disabled={!model || busy}
+              title="fill — place text anywhere on the page"
+              className={
+                'px-1 disabled:opacity-30 ' +
+                (fillToolOpen ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+              }
+            >
+              <Icon name="border-color" size={14} />
+            </button>
+            {fillToolOpen && (
+              <button
+                onClick={openSignatureDialog}
+                disabled={!model || busy}
+                title="sign"
+                className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
+              >
+                <Icon name="sign" size={14} />
+              </button>
+            )}
+
             <button
               onClick={startPlacingComment}
               disabled={!model || busy}
@@ -138,27 +207,40 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
             >
               <Icon name="comment" size={14} />
             </button>
-            <span className="mx-1 text-ink-3">│</span>
-            {EDIT_MODES.map((m) => (
+
+            <button
+              disabled
+              title="redact — coming soon (tracked separately; a fake overlay isn't real redaction)"
+              className="px-1 text-ink-4 opacity-30"
+            >
+              <Icon name="visibility-off" size={14} />
+            </button>
+          </>
+        )}
+        <span className="flex-1" />
+        {pane.kind === 'editor' && (
+          <>
+            <span className="flex items-center gap-1 text-ink-5">
               <button
-                key={m}
-                onClick={() => setEditMode(m)}
-                disabled={!model}
-                className={
-                  'px-1.5 text-xs disabled:opacity-30 ' +
-                  (editMode === m
-                    ? 'bg-ink-2 text-ink-6'
-                    : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
-                }
-                title={
-                  m === 'auto'
-                    ? 'auto: paragraphs reflow, tables edit per cell, other text per line'
-                    : `edit granularity: ${m === 'block' ? 'paragraph' : m}`
-                }
+                onClick={() => setPage(pane.id, pageIndex - 1)}
+                disabled={navDisabled || pageIndex === 0}
+                title="previous page"
+                className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
               >
-                {m === 'block' ? 'para' : m}
+                <Icon name="page-prev" size={14} />
               </button>
-            ))}
+              <span className="tabular-nums">
+                {model ? `${pageIndex + 1}/${model.pages.length}` : '–/–'}
+              </span>
+              <button
+                onClick={() => setPage(pane.id, pageIndex + 1)}
+                disabled={navDisabled || pageIndex >= (model?.pages.length ?? 1) - 1}
+                title="next page"
+                className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <Icon name="page-next" size={14} />
+              </button>
+            </span>
             <span className="mx-1 text-ink-3">│</span>
             <button
               onClick={() => setFitMode(pane.id, fitMode === 'page' ? null : 'page')}
@@ -182,20 +264,31 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
             >
               <Icon name="fit-width" size={14} />
             </button>
-            <button
-              onClick={() => setFitMode(pane.id, fitMode === 'actual' ? null : 'actual')}
-              disabled={!model}
-              title="actual size (100%)"
-              className={
-                'px-1 disabled:opacity-30 ' +
-                (fitMode === 'actual' ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
-              }
-            >
-              <Icon name="actual-size" size={14} />
-            </button>
+            <span className="mx-1 text-ink-3">│</span>
+            <span className="flex items-center gap-1 text-ink-5">
+              <button
+                onClick={() => setZoom(pane.id, zoom - 0.25)}
+                disabled={navDisabled}
+                title="zoom out"
+                className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <Icon name="zoom-out" size={14} />
+              </button>
+              <span className="w-11 text-center tabular-nums">
+                {model ? `${Math.round(zoom * 100)}%` : '–'}
+              </span>
+              <button
+                onClick={() => setZoom(pane.id, zoom + 0.25)}
+                disabled={navDisabled}
+                title="zoom in"
+                className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <Icon name="zoom-in" size={14} />
+              </button>
+            </span>
+            <span className="mx-1 text-ink-3">│</span>
           </>
         )}
-        <span className="flex-1" />
         <button
           title="split side by side"
           onClick={() => splitPaneAction(pane.id, 'row')}

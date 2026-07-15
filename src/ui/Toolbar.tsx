@@ -1,23 +1,19 @@
 import { useRef, useState } from 'react'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { Icon } from './icons'
-import { defaultPaneView, useApp } from './store'
+import { useApp } from './store'
 
 export function Toolbar() {
   const fileInput = useRef<HTMLInputElement>(null)
   const fileMenuBtn = useRef<HTMLButtonElement>(null)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const {
-    fileName, model, busy, history, historyIndex, paneViews,
+    fileName, model, busy, history, historyIndex,
     searchQuery, searchCaseSensitive, searchWholeWord, searchMatches, searchIndex,
-    requestOpen, setPage, setZoom, exportPdf, undo, redo,
-    toggleHelp, targetEditorPaneId,
+    requestOpen, exportPdf, undo, redo,
+    toggleHelp,
     setSearchQuery, setSearchCaseSensitive, setSearchWholeWord, searchNext, searchPrev, clearSearch,
   } = useApp()
-
-  const editorId = targetEditorPaneId()
-  const view = editorId ? (paneViews[editorId] ?? defaultPaneView()) : null
-  const navDisabled = !model || !editorId
 
   const onPick = async (files: FileList | null) => {
     const file = files?.[0]
@@ -126,50 +122,6 @@ export function Toolbar() {
 
       <span className="flex-1 truncate text-center text-ink-4">
         {fileName ?? '── no document ──'}
-      </span>
-
-      <span className="flex items-center gap-1 text-ink-5">
-        <button
-          onClick={() => editorId && view && setPage(editorId, view.pageIndex - 1)}
-          disabled={navDisabled || (view?.pageIndex ?? 0) === 0}
-          title="previous page"
-          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          <Icon name="page-prev" size={14} />
-        </button>
-        <span className="tabular-nums">
-          {model && view ? `${view.pageIndex + 1}/${model.pages.length}` : '–/–'}
-        </span>
-        <button
-          onClick={() => editorId && view && setPage(editorId, view.pageIndex + 1)}
-          disabled={navDisabled || (view?.pageIndex ?? 0) >= (model?.pages.length ?? 1) - 1}
-          title="next page"
-          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          <Icon name="page-next" size={14} />
-        </button>
-      </span>
-
-      <span className="flex items-center gap-1 text-ink-5">
-        <button
-          onClick={() => editorId && view && setZoom(editorId, view.zoom - 0.25)}
-          disabled={navDisabled}
-          title="zoom out"
-          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          <Icon name="zoom-out" size={14} />
-        </button>
-        <span className="w-12 text-center tabular-nums">
-          {view ? `${Math.round(view.zoom * 100)}%` : '–'}
-        </span>
-        <button
-          onClick={() => editorId && view && setZoom(editorId, view.zoom + 0.25)}
-          disabled={navDisabled}
-          title="zoom in"
-          className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          <Icon name="zoom-in" size={14} />
-        </button>
       </span>
 
       <button
