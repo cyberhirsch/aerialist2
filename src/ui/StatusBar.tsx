@@ -16,7 +16,10 @@ function countWords(model: ReturnType<typeof useApp.getState>['model']): number 
 }
 
 export function StatusBar() {
-  const { status, busy, model, editing, history, historyIndex, compressAction } = useApp()
+  const {
+    status, busy, model, editing, history, historyIndex,
+    compressAction, recompressImagesAction, reduceImagesAction,
+  } = useApp()
   const mode = busy ? 'WORKING' : editing ? 'EDIT' : model ? 'READY' : 'IDLE'
   const wordCount = countWords(model)
   const fileSize = history[historyIndex]?.byteLength ?? 0
@@ -37,6 +40,22 @@ export function StatusBar() {
             className="text-ink-4 hover:text-ink-6 disabled:opacity-40 disabled:hover:text-ink-4"
           >
             <Icon name="compress" size={13} />
+          </button>
+          <button
+            onClick={() => void recompressImagesAction()}
+            disabled={busy}
+            title="recompress images — re-encode embedded JPEGs at lower quality"
+            className="text-ink-4 hover:text-ink-6 disabled:opacity-40 disabled:hover:text-ink-4"
+          >
+            <Icon name="image" size={13} />
+          </button>
+          <button
+            onClick={() => void reduceImagesAction()}
+            disabled={busy}
+            title="reduce images — greyscale + contrast on embedded JPEGs"
+            className="text-ink-4 hover:text-ink-6 disabled:opacity-40 disabled:hover:text-ink-4"
+          >
+            <Icon name="contrast" size={13} />
           </button>
         </span>
       )}

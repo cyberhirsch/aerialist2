@@ -67,6 +67,16 @@ export interface FormField {
   multiline?: boolean
 }
 
+/** A baseline-JPEG (DCTDecode) image XObject, identified by its ref tag. */
+export interface RawJpegImage {
+  /** The indirect reference tag, e.g. "12 0 R" — stable within the doc. */
+  id: string
+  /** Raw JPEG bytes (the stream's stored contents). */
+  bytes: Uint8Array
+  width: number
+  height: number
+}
+
 /** A Text (sticky-note) PDF annotation — a comment, not page content. */
 export interface CommentAnnotation {
   /** Stable per-annotation id (its indirect reference tag). */
@@ -256,6 +266,99 @@ export class PdfHost {
       font,
       lineHeight: fontSize * 1.2,
     })
+  }
+
+  /* ── embedded images (recompress / reduce — pdf-lib territory) ── */
+
+  /**
+   * Every baseline-JPEG (single DCTDecode filter) image XObject in the
+   * document, de-duplicated by indirect ref so a picture shared across
+   * pages is listed once. Other image encodings (Flate/CCITT/JPXDecode,
+   * multi-filter chains) are skipped — we only round-trip formats a
+   * browser canvas can safely decode and re-encode.
+   */
+  listJpegImages(): RawJpegImage[] {
+    const seen = new Map<string, RawJpegImage>()
+    for (let i = 0; i < this.pageCount; i++) {
+      const xobjs = this.pageXObjects(i)
+      if (!xobjs) continue
+      for (const [, value] of xobjs.entries()) {
+        if (!(value instanceof PDFRef)) continue
+        if (seen.has(value.tag)) continue
+        const stream = this.lookup(value)
+        if (!(stream instanceof PDFRawStream)) continue
+        const dict = stream.dict
+        if (this.nameOf(dict.get(PDFName.of('Subtype'))) !== 'Image') continue
+        if (this.singleFilterName(dict) !== 'DCTDecode') continue
+        seen.set(value.tag, {
+          id: value.tag,
+          bytes: stream.getContents(),
+          width: this.numberOf(dict.get(PDFName.of('Width'))) ?? 0,
+          height: this.numberOf(dict.get(PDFName.of('Height'))) ?? 0,
+        })
+      }
+    }
+    return [...seen.values()]
+  }
+
+  /**
+   * Swap a JPEG image XObject for freshly-encoded JPEG bytes, updating
+   * every resource entry that pointed at the old ref. Preserves a soft
+   * mask (/SMask) if the original had one. The replacement is always a
+   * DeviceRGB baseline JPEG (what a canvas emits).
+   */
+  replaceJpegImage(id: string, jpegBytes: Uint8Array, width: number, height: number): void {
+    const original = this.findXObjectStream(id)
+    const dict = this.doc.context.obj({
+      Type: 'XObject',
+      Subtype: 'Image',
+      Width: width,
+      Height: height,
+      ColorSpace: 'DeviceRGB',
+      BitsPerComponent: 8,
+      Filter: 'DCTDecode',
+    }) as PDFDict
+    const smask = original?.dict.get(PDFName.of('SMask'))
+    if (smask) dict.set(PDFName.of('SMask'), smask)
+
+    const stream = PDFRawStream.of(dict, jpegBytes)
+    const newRef = this.doc.context.register(stream)
+
+    for (let i = 0; i < this.pageCount; i++) {
+      const xobjs = this.pageXObjects(i)
+      if (!xobjs) continue
+      for (const [key, value] of xobjs.entries()) {
+        if (value instanceof PDFRef && value.tag === id) xobjs.set(key, newRef)
+      }
+    }
+  }
+
+  /** The page's Resources /XObject subdictionary, if any. */
+  private pageXObjects(pageIndex: number): PDFDict | undefined {
+    const resources = this.doc.getPage(pageIndex).node.Resources()
+    return this.lookupDict(resources?.get(PDFName.of('XObject')))
+  }
+
+  private findXObjectStream(id: string): PDFRawStream | undefined {
+    for (let i = 0; i < this.pageCount; i++) {
+      const xobjs = this.pageXObjects(i)
+      if (!xobjs) continue
+      for (const [, value] of xobjs.entries()) {
+        if (value instanceof PDFRef && value.tag === id) {
+          const s = this.lookup(value)
+          if (s instanceof PDFRawStream) return s
+        }
+      }
+    }
+    return undefined
+  }
+
+  /** Filter name when a stream has exactly one filter, else undefined. */
+  private singleFilterName(dict: PDFDict): string | undefined {
+    const filter = this.lookup(dict.get(PDFName.of('Filter')))
+    if (filter instanceof PDFName) return filter.decodeText()
+    if (filter instanceof PDFArray && filter.size() === 1) return this.nameOf(filter.get(0))
+    return undefined
   }
 
   /* ── comments (Text/sticky-note annotations — pdf-lib territory) ── */

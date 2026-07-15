@@ -25,7 +25,7 @@ import { placeText } from '../model/textOps'
 import { redactRegion } from '../model/redactOps'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
-import { renderTextSignature } from './imageUtils'
+import { renderTextSignature, transformJpegBytes } from './imageUtils'
 import {
   loadSignatureLibrary,
   saveSignatureLibrary,
@@ -236,6 +236,10 @@ interface AppState {
   redo(): Promise<void>
   exportPdf(): Promise<void>
   compressAction(): Promise<void>
+  /** Re-encode embedded JPEGs at lower quality to shrink the file. */
+  recompressImagesAction(): Promise<void>
+  /** Desaturate + boost contrast on embedded JPEGs (also shrinks them). */
+  reduceImagesAction(): Promise<void>
   toggleHelp(): void
   setStatus(msg: string): void
 }
@@ -384,6 +388,45 @@ export const useApp = create<AppState>((set, get) => {
       set({ busy: false, status: `error: ${(err as Error).message}` })
       return false
     }
+  }
+
+  /**
+   * Re-encode every eligible embedded JPEG through a canvas transform,
+   * swap in the new bytes, then snapshot via commitStructural. Image
+   * XObjects aren't part of the text model, so reusing the existing
+   * model (no reparse) is safe; only the rendered bitmap changes.
+   */
+  const processJpegImages = async (
+    transform: Parameters<typeof transformJpegBytes>[1],
+    opts: { onlyIfSmaller: boolean; verb: string },
+  ) => {
+    const { host, busy } = get()
+    if (!host || busy) return
+    const images = host.listJpegImages()
+    if (images.length === 0) {
+      set({ status: 'no recompressible JPEG images found in this document' })
+      return
+    }
+    await commitStructural(async () => {
+      let processed = 0
+      let before = 0
+      let after = 0
+      for (const img of images) {
+        const out = await transformJpegBytes(img.bytes, transform)
+        if (!out) continue
+        if (opts.onlyIfSmaller && out.bytes.length >= img.bytes.length) continue
+        host.replaceJpegImage(img.id, out.bytes, out.width, out.height)
+        processed++
+        before += img.bytes.length
+        after += out.bytes.length
+      }
+      if (processed === 0) return `${opts.verb}: nothing to reduce`
+      const saved = before - after
+      const pct = before > 0 ? Math.round((saved / before) * 100) : 0
+      return `${opts.verb}: ${processed} image(s), ${formatBytes(before)} → ${formatBytes(after)}${
+        saved > 0 ? ` (${pct}% smaller)` : ''
+      }`
+    })
   }
 
   return {
@@ -926,6 +969,20 @@ export const useApp = create<AppState>((set, get) => {
       } catch (err) {
         set({ busy: false, status: `compress error: ${(err as Error).message}` })
       }
+    },
+
+    async recompressImagesAction() {
+      await processJpegImages(
+        { quality: 0.6 },
+        { onlyIfSmaller: true, verb: 'recompressed images' },
+      )
+    },
+
+    async reduceImagesAction() {
+      await processJpegImages(
+        { quality: 0.7, grayscale: true, contrast: 1.15 },
+        { onlyIfSmaller: false, verb: 'reduced images (greyscale)' },
+      )
     },
 
     async exportPdf() {
