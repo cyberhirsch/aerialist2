@@ -6,6 +6,8 @@ import { RsvpPane } from './RsvpPane'
 import { useApp } from './store'
 import { PANE_KINDS, type LayoutNode, type PaneKind, type PaneNode, type SplitNode } from './workspace'
 
+const EDIT_MODES = ['auto', 'word', 'line', 'block'] as const
+
 export function WorkspaceView() {
   const layout = useApp((s) => s.layout)
   return (
@@ -75,7 +77,15 @@ function SplitView({ split }: { split: SplitNode }) {
 
 function PaneFrame({ pane }: { pane: PaneNode }) {
   const focusedPaneId = useApp((s) => s.focusedPaneId)
-  const { focusPane, splitPaneAction, closePaneAction, setPaneKindAction, layout } = useApp()
+  const model = useApp((s) => s.model)
+  const busy = useApp((s) => s.busy)
+  const editMode = useApp((s) => s.editMode)
+  const commentPlacementActive = useApp((s) => s.commentPlacementActive)
+  const fitMode = useApp((s) => s.paneViews[pane.id]?.fitMode ?? null)
+  const {
+    focusPane, splitPaneAction, closePaneAction, setPaneKindAction, layout,
+    setEditMode, openSignatureDialog, openFillDialog, startPlacingComment, setFitMode,
+  } = useApp()
   const focused = focusedPaneId === pane.id
   const isOnlyPane = layout.type === 'pane'
 
@@ -98,6 +108,93 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
             </option>
           ))}
         </select>
+        {pane.kind === 'editor' && (
+          <>
+            <span className="mx-1 text-ink-3">│</span>
+            <button
+              onClick={openSignatureDialog}
+              disabled={!model || busy}
+              title="sign"
+              className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
+            >
+              <Icon name="sign" size={14} />
+            </button>
+            <button
+              onClick={openFillDialog}
+              disabled={!model || busy}
+              title="fill — place text anywhere on the page"
+              className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
+            >
+              <Icon name="edit" size={14} />
+            </button>
+            <button
+              onClick={startPlacingComment}
+              disabled={!model || busy}
+              title="comment — click a spot on the page to add a note"
+              className={
+                'px-1 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30 ' +
+                (commentPlacementActive ? 'bg-ink-2 text-ink-6' : 'text-ink-4')
+              }
+            >
+              <Icon name="comment" size={14} />
+            </button>
+            <span className="mx-1 text-ink-3">│</span>
+            {EDIT_MODES.map((m) => (
+              <button
+                key={m}
+                onClick={() => setEditMode(m)}
+                disabled={!model}
+                className={
+                  'px-1.5 text-xs disabled:opacity-30 ' +
+                  (editMode === m
+                    ? 'bg-ink-2 text-ink-6'
+                    : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+                }
+                title={
+                  m === 'auto'
+                    ? 'auto: paragraphs reflow, tables edit per cell, other text per line'
+                    : `edit granularity: ${m === 'block' ? 'paragraph' : m}`
+                }
+              >
+                {m === 'block' ? 'para' : m}
+              </button>
+            ))}
+            <span className="mx-1 text-ink-3">│</span>
+            <button
+              onClick={() => setFitMode(pane.id, fitMode === 'page' ? null : 'page')}
+              disabled={!model}
+              title="fit page — whole page visible"
+              className={
+                'px-1 disabled:opacity-30 ' +
+                (fitMode === 'page' ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+              }
+            >
+              <Icon name="fit-page" size={14} />
+            </button>
+            <button
+              onClick={() => setFitMode(pane.id, fitMode === 'width' ? null : 'width')}
+              disabled={!model}
+              title="fit width — horizontal fit"
+              className={
+                'px-1 disabled:opacity-30 ' +
+                (fitMode === 'width' ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+              }
+            >
+              <Icon name="fit-width" size={14} />
+            </button>
+            <button
+              onClick={() => setFitMode(pane.id, fitMode === 'actual' ? null : 'actual')}
+              disabled={!model}
+              title="actual size (100%)"
+              className={
+                'px-1 disabled:opacity-30 ' +
+                (fitMode === 'actual' ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+              }
+            >
+              <Icon name="actual-size" size={14} />
+            </button>
+          </>
+        )}
         <span className="flex-1" />
         <button
           title="split side by side"

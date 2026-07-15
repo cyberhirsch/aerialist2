@@ -3,6 +3,7 @@ import { groupCells } from '../engine/detect'
 import { apply, invert, pageViewportTransform, rectToCssBox as cssRect } from '../engine/matrix'
 import type { Block, Line, Rect, Word } from '../model/document'
 import { rectContains, unionRect } from '../model/document'
+import { CommentOverlay } from './CommentOverlay'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { FormFieldOverlay } from './FormFieldOverlay'
 import { SignaturePlacer } from './SignaturePlacer'
@@ -51,18 +52,26 @@ function wordsBBox(words: Word[]): Rect {
 
 const lineText = (line: Line) => line.words.map((w) => w.text).join(' ')
 
+/** Must match the scroll container's `p-6` padding (1.5rem = 24px per side). */
+const EDITOR_PAD = 24
+
 export function EditorPane({ paneId }: { paneId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const {
-    model, renderer, revision, editing, editMode, busy,
+    model, renderer, revision, editing, editMode, busy, placement,
     history, historyIndex, searchMatches, searchIndex,
-    startEdit, cancelEdit, applyEdit, undo, redo, exportPdf, setStatus,
+    commentPlacementActive, openCommentEditor,
+    startEdit, cancelEdit, applyEdit, undo, redo, exportPdf, setStatus, setPage,
+    updatePaneView,
   } = useApp()
   const view = useApp((s) => s.paneViews[paneId]) ?? defaultPaneView()
-  const { pageIndex, zoom } = view
+  const { pageIndex, zoom, fitMode } = view
   const [hovered, setHovered] = useState<Hit | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
   const currentMatchRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const lastPageFlipRef = useRef(0)
+  const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null)
 
   const page = model?.pages[pageIndex] ?? null
 
@@ -88,6 +97,40 @@ export function EditorPane({ paneId }: { paneId: string }) {
     currentMatchRef.current?.scrollIntoView({ block: 'center', inline: 'center' })
   }, [searchIndex, pageIndex])
 
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) setContainerSize({ w: entry.contentRect.width, h: entry.contentRect.height })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // recompute zoom to satisfy the active fit mode whenever the pane
+  // resizes or the page's (rotation-adjusted) dimensions change.
+  // Reads live clientWidth/clientHeight off the ref (not the
+  // ResizeObserver-derived containerSize state) so it applies
+  // immediately on a fit-mode toggle rather than waiting on the
+  // observer's next callback; containerSize is still a dependency so
+  // an actual pane resize re-triggers this.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!fitMode || !page || !el) return
+    const base = pageViewportTransform(page.width, page.height, page.rotation, 1)
+    const availW = Math.max(40, el.clientWidth - EDITOR_PAD * 2)
+    const availH = Math.max(40, el.clientHeight - EDITOR_PAD * 2)
+    const target =
+      fitMode === 'actual'
+        ? 1
+        : fitMode === 'width'
+          ? availW / base.cssWidth
+          : Math.min(availW / base.cssWidth, availH / base.cssHeight)
+    const clamped = Math.max(0.1, Math.min(8, target))
+    if (Math.abs(clamped - zoom) > 0.005) updatePaneView(paneId, { zoom: clamped })
+  }, [fitMode, containerSize, page, paneId, updatePaneView, zoom])
+
   const hitTest = useCallback(
     (e: React.MouseEvent): Hit | null => {
       if (!page || !pdfToCss) return null
@@ -108,6 +151,51 @@ export function EditorPane({ paneId }: { paneId: string }) {
       return null
     },
     [page, pdfToCss],
+  )
+
+  /** PDF-space point under the cursor, for comment placement. */
+  const hitPoint = useCallback(
+    (e: React.MouseEvent): { x: number; y: number } | null => {
+      if (!pdfToCss) return null
+      const rect = e.currentTarget.getBoundingClientRect()
+      const [x, y] = apply(invert(pdfToCss), e.clientX - rect.left, e.clientY - rect.top)
+      return { x, y }
+    },
+    [pdfToCss],
+  )
+
+  /**
+   * Scrolling past the bottom edge advances to the next page (and
+   * resets scroll to the top); past the top edge goes to the previous
+   * page. A cooldown prevents one continued scroll/trackpad gesture
+   * from skipping multiple pages.
+   */
+  const onWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (busy || placement || commentPlacementActive) return
+      if (editing && editing.paneId === paneId) return
+      const el = scrollRef.current
+      if (!el || !model) return
+      if (Date.now() - lastPageFlipRef.current < 500) return
+
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2
+      const atTop = el.scrollTop <= 2
+
+      if (e.deltaY > 10 && atBottom && pageIndex < model.pages.length - 1) {
+        lastPageFlipRef.current = Date.now()
+        setPage(paneId, pageIndex + 1)
+        // 0 is always a valid scroll position, so this doesn't need to
+        // wait for the next page's render to commit
+        el.scrollTop = 0
+      } else if (e.deltaY < -10 && atTop && pageIndex > 0) {
+        lastPageFlipRef.current = Date.now()
+        setPage(paneId, pageIndex - 1)
+        // an oversized value clamps to the true max scroll position,
+        // sidestepping the same not-yet-rendered timing issue
+        el.scrollTop = Number.MAX_SAFE_INTEGER
+      }
+    },
+    [busy, placement, commentPlacementActive, editing, paneId, model, pageIndex, setPage],
   )
 
   const setRsvpAnchor = useApp((s) => s.setRsvpAnchor)
@@ -236,21 +324,35 @@ export function EditorPane({ paneId }: { paneId: string }) {
     : []
 
   return (
-    <div className="h-full overflow-auto p-6">
+    <div
+      ref={scrollRef}
+      className="h-full overflow-auto p-6"
+      style={{ overflowAnchor: 'none' }}
+      onWheel={onWheel}
+    >
       <div
-        className="relative mx-auto border border-ink-3"
+        className={
+          'relative mx-auto border border-ink-3' +
+          (commentPlacementActive ? ' cursor-crosshair' : '')
+        }
         style={viewport ? { width: viewport.cssWidth, height: viewport.cssHeight } : undefined}
         onMouseMove={(e) => {
-          if (!paneEditing) setHovered(hitTest(e))
+          if (!paneEditing && !commentPlacementActive) setHovered(hitTest(e))
         }}
         onMouseLeave={() => setHovered(null)}
         onClick={(e) => {
           if (busy) return
+          if (commentPlacementActive) {
+            const point = hitPoint(e)
+            if (point) openCommentEditor(paneId, pageIndex, point)
+            return
+          }
           const hit = hitTest(e)
           if (hit) beginEdit(hit)
         }}
         onContextMenu={(e) => {
           e.preventDefault()
+          if (commentPlacementActive) return
           setMenu({ x: e.clientX, y: e.clientY, hit: hitTest(e) })
         }}
       >
@@ -307,6 +409,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
         )}
 
         {pdfToCss && <SignaturePlacer paneId={paneId} pdfToCss={pdfToCss} />}
+        {pdfToCss && <CommentOverlay paneId={paneId} pageIndex={pageIndex} pdfToCss={pdfToCss} />}
       </div>
 
       {menu && (

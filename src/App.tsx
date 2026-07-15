@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react'
+import { FillDialog } from './ui/FillDialog'
 import { HelpOverlay } from './ui/HelpOverlay'
 import { SaveDialog } from './ui/SaveDialog'
 import { SignatureDialog } from './ui/SignatureDialog'
@@ -112,6 +113,12 @@ export default function App() {
         s.cancelPlacement()
       } else if (e.key === 'Escape' && s.signatureDialogOpen) {
         s.closeSignatureDialog()
+      } else if (e.key === 'Escape' && s.fillDialogOpen) {
+        s.closeFillDialog()
+      } else if (e.key === 'Escape' && s.commentEditor) {
+        s.closeCommentEditor()
+      } else if (e.key === 'Escape' && s.commentPlacementActive) {
+        s.cancelPlacingComment()
       } else if (e.key === 'Escape' && s.selectedPages.size > 0) {
         s.clearSelection()
       }
@@ -145,6 +152,7 @@ export default function App() {
       <HelpOverlay />
       <SaveDialog />
       <SignatureDialog />
+      <FillDialog />
     </div>
   )
 }

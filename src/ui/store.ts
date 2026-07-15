@@ -9,6 +9,7 @@
 import { create } from 'zustand'
 import type { Rect } from '../model/document'
 import { loadDocumentModel } from '../model/buildModel'
+import { formatBytes } from './format'
 import { replaceSpanText, type LayoutOpts, type SpanTarget } from '../model/editText'
 import {
   deletePage,
@@ -20,8 +21,10 @@ import {
 import { setFormFieldValue } from '../model/formOps'
 import { findMatches, type SearchMatch } from '../model/search'
 import { placeImage } from '../model/signatureOps'
+import { placeText } from '../model/textOps'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
+import { renderTextSignature } from './imageUtils'
 import {
   loadSignatureLibrary,
   saveSignatureLibrary,
@@ -58,16 +61,29 @@ export interface EditingState {
   layout?: LayoutOpts
 }
 
+export type FitMode = 'page' | 'width' | 'actual' | null
+
 export interface PaneView {
   pageIndex: number
   zoom: number
+  /**
+   * When set, EditorPane recomputes `zoom` on container resize/page
+   * change to keep this fit satisfied. Manual +/- zoom clears it back
+   * to null (see setZoom).
+   */
+  fitMode: FitMode
   /** rsvp */
   wpm: number
   playing: boolean
   wordPos: number
 }
 
-/** A signature/initials/date-stamp image being positioned before it's embedded. */
+/**
+ * A signature/initials/date-stamp image, or free-typed text, being
+ * positioned before it's embedded. `kind` defaults to 'image' — the
+ * drag/resize/place UX (SignaturePlacer) is identical for both; only
+ * what gets embedded on confirm differs.
+ */
 export interface SignaturePlacement {
   paneId: string
   pageIndex: number
@@ -75,11 +91,24 @@ export interface SignaturePlacement {
   dataUrl: string
   pngBytes: Uint8Array
   aspect: number
+  kind?: 'image' | 'text'
+  text?: string
+}
+
+/** The comment editor popup — open for a new marker or an existing one. */
+export interface CommentEditorState {
+  paneId: string
+  pageIndex: number
+  point: { x: number; y: number }
+  /** null while composing a brand-new comment. */
+  id: string | null
+  initial: string
 }
 
 export const defaultPaneView = (): PaneView => ({
   pageIndex: 0,
   zoom: 1.25,
+  fitMode: null,
   wpm: 300,
   playing: false,
   wordPos: 0,
@@ -167,9 +196,29 @@ interface AppState {
   addSavedSignature(kind: SignatureKind, label: string, dataUrl: string, aspect: number): void
   deleteSavedSignature(id: string): void
 
+  fillDialogOpen: boolean
+  openFillDialog(): void
+  closeFillDialog(): void
+  beginTextPlacement(text: string): void
+
+  commentPlacementActive: boolean
+  commentEditor: CommentEditorState | null
+  startPlacingComment(): void
+  cancelPlacingComment(): void
+  openCommentEditor(
+    paneId: string,
+    pageIndex: number,
+    point: { x: number; y: number },
+    existing?: { id: string; contents: string },
+  ): void
+  closeCommentEditor(): void
+  saveCommentAction(text: string): Promise<void>
+  deleteCommentAction(): Promise<void>
+
   openFile(name: string, bytes: Uint8Array): Promise<void>
   setPage(paneId: string, index: number): void
   setZoom(paneId: string, zoom: number): void
+  setFitMode(paneId: string, mode: FitMode): void
   setEditMode(mode: EditMode): void
   startEdit(editing: Omit<EditingState, 'pageIndex'> & { pageIndex: number }): void
   cancelEdit(): void
@@ -177,6 +226,7 @@ interface AppState {
   undo(): Promise<void>
   redo(): Promise<void>
   exportPdf(): Promise<void>
+  compressAction(): Promise<void>
   toggleHelp(): void
   setStatus(msg: string): void
 }
@@ -347,6 +397,9 @@ export const useApp = create<AppState>((set, get) => {
     signatureLibrary: loadSignatureLibrary(),
     signatureDialogOpen: false,
     placement: null,
+    fillDialogOpen: false,
+    commentPlacementActive: false,
+    commentEditor: null,
 
     searchQuery: '',
     searchCaseSensitive: false,
@@ -519,6 +572,103 @@ export const useApp = create<AppState>((set, get) => {
       set({ signatureDialogOpen: false })
     },
 
+    openFillDialog() {
+      set({ fillDialogOpen: true })
+    },
+
+    closeFillDialog() {
+      set({ fillDialogOpen: false })
+    },
+
+    beginTextPlacement(text) {
+      const editorId = get().targetEditorPaneId()
+      const { model } = get()
+      if (!editorId || !model) return
+      const pageIndex = get().paneView(editorId).pageIndex
+      const page = model.pages[pageIndex]
+      if (!page) return
+      // only the aspect ratio is used — the rendered dataUrl is discarded,
+      // SignaturePlacer shows live text instead of this raster preview
+      const { aspect } = renderTextSignature(text, '24px "Cascadia Mono", monospace')
+      const width = Math.min(240, page.width * 0.5)
+      const height = width / aspect
+      const rect: Rect = {
+        x: (page.width - width) / 2,
+        y: (page.height - height) / 2,
+        w: width,
+        h: height,
+      }
+      set({
+        fillDialogOpen: false,
+        placement: {
+          paneId: editorId,
+          pageIndex,
+          rect,
+          dataUrl: '',
+          pngBytes: new Uint8Array(0),
+          aspect,
+          kind: 'text',
+          text,
+        },
+      })
+    },
+
+    startPlacingComment() {
+      set({ commentPlacementActive: true })
+    },
+
+    cancelPlacingComment() {
+      set({ commentPlacementActive: false })
+    },
+
+    openCommentEditor(paneId, pageIndex, point, existing) {
+      set({
+        commentPlacementActive: false,
+        commentEditor: {
+          paneId,
+          pageIndex,
+          point,
+          id: existing?.id ?? null,
+          initial: existing?.contents ?? '',
+        },
+      })
+    },
+
+    closeCommentEditor() {
+      set({ commentEditor: null })
+    },
+
+    async saveCommentAction(text) {
+      const { commentEditor } = get()
+      const trimmed = text.trim()
+      if (!commentEditor || !trimmed) {
+        set({ commentEditor: null })
+        return
+      }
+      await commitStructural(() => {
+        if (commentEditor.id) {
+          get().host!.updateComment(commentEditor.pageIndex, commentEditor.id, trimmed)
+          return 'comment updated'
+        }
+        get().host!.addComment(commentEditor.pageIndex, commentEditor.point, trimmed)
+        return 'comment added'
+      })
+      set({ commentEditor: null })
+    },
+
+    async deleteCommentAction() {
+      const { commentEditor } = get()
+      if (!commentEditor?.id) {
+        set({ commentEditor: null })
+        return
+      }
+      await commitStructural(() => {
+        get().host!.deleteComment(commentEditor.pageIndex, commentEditor.id!)
+        return 'comment deleted'
+      })
+      set({ commentEditor: null })
+    },
+
     beginPlacement(dataUrl, pngBytes, aspect) {
       const editorId = get().targetEditorPaneId()
       const { model } = get()
@@ -553,7 +703,12 @@ export const useApp = create<AppState>((set, get) => {
       if (!placement) return
       const { pageIndex, rect, pngBytes } = placement
       const ok = await commitViaReload(async () => {
-        await placeImage(get().host!, pageIndex, pngBytes, rect)
+        if (placement.kind === 'text' && placement.text) {
+          const fontSize = Math.max(6, Math.min(72, rect.h * 0.7))
+          await placeText(get().host!, pageIndex, placement.text, rect, fontSize)
+        } else {
+          await placeImage(get().host!, pageIndex, pngBytes, rect)
+        }
       }, `placed on page ${pageIndex + 1}`)
       if (ok) set({ placement: null })
     },
@@ -633,8 +788,13 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     setZoom(paneId, zoom) {
-      get().updatePaneView(paneId, { zoom: Math.max(0.25, Math.min(4, zoom)) })
+      // manual zoom always breaks out of a fit mode's auto-tracking
+      get().updatePaneView(paneId, { zoom: Math.max(0.25, Math.min(4, zoom)), fitMode: null })
       set((s) => ({ editing: s.editing?.paneId === paneId ? null : s.editing }))
+    },
+
+    setFitMode(paneId, mode) {
+      get().updatePaneView(paneId, { fitMode: mode })
     },
 
     setEditMode(mode) {
@@ -710,6 +870,36 @@ export const useApp = create<AppState>((set, get) => {
 
     toggleHelp() {
       set((s) => ({ helpOpen: !s.helpOpen }))
+    },
+
+    async compressAction() {
+      const { host, busy, history, historyIndex } = get()
+      if (!host || busy) return
+      const before = history[historyIndex]?.byteLength ?? 0
+      set({ busy: true, status: 'compressing …' })
+      try {
+        const bytes = await host.compress()
+        await get().renderer.load(bytes)
+        const after = bytes.byteLength
+        const saved = before - after
+        set((s) => {
+          const history = [...s.history.slice(0, s.historyIndex + 1), bytes].slice(
+            -HISTORY_LIMIT,
+          )
+          return {
+            busy: false,
+            revision: s.revision + 1,
+            history,
+            historyIndex: history.length - 1,
+            status:
+              saved > 0
+                ? `compressed — ${formatBytes(before)} → ${formatBytes(after)} (${Math.round((saved / before) * 100)}% smaller)`
+                : 'compressed — already as small as it gets',
+          }
+        })
+      } catch (err) {
+        set({ busy: false, status: `compress error: ${(err as Error).message}` })
+      }
     },
 
     async exportPdf() {

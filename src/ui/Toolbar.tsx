@@ -1,32 +1,17 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 import { Icon } from './icons'
 import { defaultPaneView, useApp } from './store'
 
-function Key({ label, onClick, disabled }: {
-  label: string
-  onClick?: () => void
-  disabled?: boolean
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-7 disabled:opacity-40 disabled:hover:bg-transparent"
-    >
-      {label}
-    </button>
-  )
-}
-
-const MODES = ['auto', 'word', 'line', 'block'] as const
-
 export function Toolbar() {
   const fileInput = useRef<HTMLInputElement>(null)
+  const fileMenuBtn = useRef<HTMLButtonElement>(null)
+  const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const {
-    fileName, model, busy, editMode, history, historyIndex, paneViews,
+    fileName, model, busy, history, historyIndex, paneViews,
     searchQuery, searchCaseSensitive, searchWholeWord, searchMatches, searchIndex,
-    requestOpen, setPage, setZoom, setEditMode, exportPdf, undo, redo,
-    toggleHelp, targetEditorPaneId, openSignatureDialog,
+    requestOpen, setPage, setZoom, exportPdf, undo, redo,
+    toggleHelp, targetEditorPaneId,
     setSearchQuery, setSearchCaseSensitive, setSearchWholeWord, searchNext, searchPrev, clearSearch,
   } = useApp()
 
@@ -41,20 +26,40 @@ export function Toolbar() {
     await requestOpen(file.name, bytes)
   }
 
+  const fileMenuItems: MenuItem[] = [
+    { label: 'open', action: () => fileInput.current?.click(), disabled: busy },
+    { label: 'export', action: () => void exportPdf(), disabled: !model || busy },
+    { separator: true, label: '' },
+    { label: 'undo', action: () => void undo(), disabled: busy || historyIndex <= 0 },
+    { label: 'redo', action: () => void redo(), disabled: busy || historyIndex >= history.length - 1 },
+  ]
+  const fileMenuPos = fileMenuBtn.current?.getBoundingClientRect()
+
   return (
     <header className="flex h-9 items-center gap-3 border-b border-ink-3 bg-ink-1 px-3 select-none">
       <span className="text-ink-7">aerialist<span className="text-ink-4">2</span></span>
       <span className="text-ink-3">│</span>
 
-      <Key label="[ open ]" onClick={() => fileInput.current?.click()} disabled={busy} />
-      <Key label="[ export ]" onClick={() => void exportPdf()} disabled={!model || busy} />
-      <Key label="[ undo ]" onClick={() => void undo()} disabled={busy || historyIndex <= 0} />
-      <Key
-        label="[ redo ]"
-        onClick={() => void redo()}
-        disabled={busy || historyIndex >= history.length - 1}
-      />
-      <Key label="[ sign ]" onClick={openSignatureDialog} disabled={!model || busy} />
+      <button
+        ref={fileMenuBtn}
+        onClick={() => setFileMenuOpen((v) => !v)}
+        title="file: open / export / undo / redo"
+        className={
+          'flex items-center gap-1 px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-7 ' +
+          (fileMenuOpen ? 'bg-ink-2 text-ink-7' : '')
+        }
+      >
+        <Icon name="open" size={14} />
+        <span>▾</span>
+      </button>
+      {fileMenuOpen && fileMenuPos && (
+        <ContextMenu
+          x={fileMenuPos.left}
+          y={fileMenuPos.bottom + 2}
+          items={fileMenuItems}
+          onClose={() => setFileMenuOpen(false)}
+        />
+      )}
 
       <span className="text-ink-3">│</span>
       <span className="flex items-center gap-1">
@@ -117,30 +122,6 @@ export function Toolbar() {
         >
           <Icon name="page-next" size={14} />
         </button>
-      </span>
-
-      <span className="text-ink-3">│</span>
-      <span className="flex items-center text-ink-5">
-        {MODES.map((m) => (
-          <button
-            key={m}
-            onClick={() => setEditMode(m)}
-            disabled={!model}
-            className={
-              'px-1.5 disabled:opacity-40 ' +
-              (editMode === m
-                ? 'bg-ink-2 text-ink-7'
-                : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
-            }
-            title={
-              m === 'auto'
-                ? 'auto: paragraphs reflow, tables edit per cell, other text per line'
-                : `edit granularity: ${m === 'block' ? 'paragraph' : m}`
-            }
-          >
-            {m === 'block' ? 'para' : m}
-          </button>
-        ))}
       </span>
 
       <span className="flex-1 truncate text-center text-ink-4">

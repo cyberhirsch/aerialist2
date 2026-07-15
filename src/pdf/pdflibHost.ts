@@ -67,6 +67,14 @@ export interface FormField {
   multiline?: boolean
 }
 
+/** A Text (sticky-note) PDF annotation — a comment, not page content. */
+export interface CommentAnnotation {
+  /** Stable per-annotation id (its indirect reference tag). */
+  id: string
+  rect: { x: number; y: number; w: number; h: number }
+  contents: string
+}
+
 export class PdfHost {
   readonly doc: PDFDocument
 
@@ -138,6 +146,15 @@ export class PdfHost {
 
   async save(): Promise<Uint8Array> {
     return this.doc.save({ useObjectStreams: false })
+  }
+
+  /**
+   * Re-serialize with object streams enabled — a structural, lossless
+   * size reduction (packs indirect objects into compressed streams).
+   * Does not touch page content/images, so it's always safe to run.
+   */
+  async compress(): Promise<Uint8Array> {
+    return this.doc.save({ useObjectStreams: true })
   }
 
   /* ── page management (commodity ops — pdf-lib territory) ────── */
@@ -214,6 +231,107 @@ export class PdfHost {
     const image = await this.doc.embedPng(pngBytes)
     const page = this.doc.getPage(pageIndex)
     page.drawImage(image, { x: rect.x, y: rect.y, width: rect.w, height: rect.h })
+  }
+
+  /**
+   * Draw free-form text onto a page via pdf-lib's own drawText — real
+   * content-stream text, not an overlay. Same round-trip-reload
+   * requirement as embedImage (see its note above): the caller must
+   * re-derive the model from fresh save() bytes afterward, which then
+   * lets our own content-stream parser pick this text up as a normal
+   * editable word/line going forward.
+   */
+  async embedText(
+    pageIndex: number,
+    text: string,
+    rect: { x: number; y: number; w: number; h: number },
+    fontSize: number,
+  ): Promise<void> {
+    const font = await this.doc.embedFont(StandardFonts.Helvetica)
+    const page = this.doc.getPage(pageIndex)
+    page.drawText(text, {
+      x: rect.x,
+      y: rect.y + rect.h - fontSize,
+      size: fontSize,
+      font,
+      lineHeight: fontSize * 1.2,
+    })
+  }
+
+  /* ── comments (Text/sticky-note annotations — pdf-lib territory) ── */
+
+  /** Icon size in PDF user-space units for a new comment marker. */
+  private static readonly COMMENT_SIZE = 18
+
+  addComment(pageIndex: number, point: { x: number; y: number }, contents: string): void {
+    const page = this.doc.getPage(pageIndex)
+    const size = PdfHost.COMMENT_SIZE
+    const dict = this.doc.context.obj({
+      Type: 'Annot',
+      Subtype: 'Text',
+      Rect: [point.x, point.y, point.x + size, point.y + size],
+      Contents: PDFString.of(contents),
+      Name: 'Comment',
+      Open: false,
+    })
+    const ref = this.doc.context.register(dict)
+    page.node.addAnnot(ref)
+  }
+
+  /** All Text-subtype annotations on a page (comments this app or another tool added). */
+  getComments(pageIndex: number): CommentAnnotation[] {
+    const page = this.doc.getPage(pageIndex)
+    const annots = page.node.Annots()
+    if (!annots) return []
+    const out: CommentAnnotation[] = []
+    for (let i = 0; i < annots.size(); i++) {
+      const ref = annots.get(i)
+      const dict = this.lookupDict(ref)
+      if (!dict || this.nameOf(dict.get(PDFName.of('Subtype'))) !== 'Text') continue
+      const rectArr = this.lookup(dict.get(PDFName.of('Rect')))
+      if (!(rectArr instanceof PDFArray) || rectArr.size() < 4) continue
+      const nums = [0, 1, 2, 3].map((j) => this.numberOf(rectArr.get(j)) ?? 0)
+      const contentsObj = this.lookup(dict.get(PDFName.of('Contents')))
+      const contents =
+        contentsObj instanceof PDFString || contentsObj instanceof PDFHexString
+          ? contentsObj.decodeText()
+          : ''
+      out.push({
+        id: ref instanceof PDFRef ? ref.tag : `${pageIndex}:${i}`,
+        rect: { x: nums[0], y: nums[1], w: nums[2] - nums[0], h: nums[3] - nums[1] },
+        contents,
+      })
+    }
+    return out
+  }
+
+  updateComment(pageIndex: number, id: string, contents: string): void {
+    const dict = this.findAnnotDict(pageIndex, id)
+    dict?.set(PDFName.of('Contents'), PDFString.of(contents))
+  }
+
+  deleteComment(pageIndex: number, id: string): void {
+    const page = this.doc.getPage(pageIndex)
+    const annots = page.node.Annots()
+    if (!annots) return
+    for (let i = 0; i < annots.size(); i++) {
+      const ref = annots.get(i)
+      if (ref instanceof PDFRef && ref.tag === id) {
+        page.node.removeAnnot(ref)
+        return
+      }
+    }
+  }
+
+  private findAnnotDict(pageIndex: number, id: string): PDFDict | undefined {
+    const page = this.doc.getPage(pageIndex)
+    const annots = page.node.Annots()
+    if (!annots) return undefined
+    for (let i = 0; i < annots.size(); i++) {
+      const ref = annots.get(i)
+      if (ref instanceof PDFRef && ref.tag === id) return this.lookupDict(ref)
+    }
+    return undefined
   }
 
   /* ── fallback font ─────────────────────────────────────────── */
