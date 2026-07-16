@@ -5,6 +5,10 @@
  * document from fresh save() bytes afterward (see the host method's
  * note on why an in-place model patch isn't safe there).
  *
+ * placeSignatureText embeds a typed signature's own script font and
+ * draws real PDF text with it — never traced or rasterized. Same
+ * reload requirement as placeImage (it goes through pdf-lib's drawText).
+ *
  * placeVectorStrokes writes traced signature centerlines straight into
  * the content stream as stroked path operators — real vector ink, never
  * a rasterized stamp. It rebuilds the page model itself, so plain
@@ -23,6 +27,17 @@ export async function placeImage(
   rect: Rect,
 ): Promise<void> {
   await host.embedImage(pageIndex, pngBytes, { x: rect.x, y: rect.y, w: rect.w, h: rect.h })
+}
+
+export async function placeSignatureText(
+  host: PdfHost,
+  pageIndex: number,
+  text: string,
+  fontBytes: Uint8Array,
+  rect: Rect,
+): Promise<void> {
+  const fontSize = Math.max(6, Math.min(96, rect.h * 0.7))
+  await host.embedText(pageIndex, text, { x: rect.x, y: rect.y, w: rect.w, h: rect.h }, fontSize, fontBytes)
 }
 
 /** Polyline strokes in a y-down view box (as traced from an image). */

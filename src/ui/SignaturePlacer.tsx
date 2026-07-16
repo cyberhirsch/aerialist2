@@ -1,5 +1,6 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { applyDelta, invert, rectToCssBox, type Matrix } from '../engine/matrix'
+import { ensureSignatureFont } from './googleFonts'
 import { Icon } from './icons'
 import { useApp } from './store'
 
@@ -46,6 +47,12 @@ export function SignaturePlacer({ paneId, pdfToCss }: { paneId: string; pdfToCss
     [pdfToCss, updatePlacementRect],
   )
 
+  // the ghost's live preview needs the actual font while dragging —
+  // the real embed (fetching a glyph-subset TTF) only happens on place
+  useEffect(() => {
+    if (placement?.text) void ensureSignatureFont(placement.text.font)
+  }, [placement?.text])
+
   if (!placement || placement.paneId !== paneId) return null
   const css = rectToCssBox(placement.rect, pdfToCss)
 
@@ -58,12 +65,26 @@ export function SignaturePlacer({ paneId, pdfToCss }: { paneId: string; pdfToCss
         onClick={(e) => e.stopPropagation()}
         onContextMenu={(e) => e.stopPropagation()}
       >
-        <img
-          src={placement.dataUrl}
-          alt="signature"
-          draggable={false}
-          className="h-full w-full select-none"
-        />
+        {placement.text ? (
+          <div
+            className="flex h-full w-full items-center overflow-hidden px-1 text-black select-none"
+            style={{
+              fontFamily: `"${placement.text.font}"`,
+              fontSize: css.height * 0.7,
+              lineHeight: 1.1,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {placement.text.text}
+          </div>
+        ) : (
+          <img
+            src={placement.dataUrl}
+            alt="signature"
+            draggable={false}
+            className="h-full w-full select-none"
+          />
+        )}
         <div
           onPointerDown={startDrag('resize')}
           onClick={(e) => e.stopPropagation()}

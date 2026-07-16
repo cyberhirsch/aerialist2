@@ -20,15 +20,16 @@ import {
 } from '../model/pageOps'
 import { setFormFieldValue } from '../model/formOps'
 import { findMatches, type SearchMatch } from '../model/search'
-import { placeImage, placeVectorStrokes } from '../model/signatureOps'
+import { placeImage, placeSignatureText, placeVectorStrokes } from '../model/signatureOps'
 import { placeText } from '../model/textOps'
 import { highlightRegion, redactRegion } from '../model/redactOps'
+import { fetchSignatureFontBytes, type SignatureFont } from './googleFonts'
 import {
   loadSvgSignatures,
   MAX_SIGNATURES,
   parseSignatureSvg,
   saveSvgSignatures,
-  type SvgSignature,
+  type SignatureSlot,
 } from './svgSignatures'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
@@ -101,6 +102,8 @@ export interface SignaturePlacement {
   aspect: number
   /** Present for traced s1..s10 stamps — placed as vector strokes. */
   vector?: { svg: string }
+  /** Present for typed s1..s10 stamps — placed as real embedded-font text. */
+  text?: { text: string; font: SignatureFont }
 }
 
 /** An inline fill-text editor pinned to a spot on the page. */
@@ -202,10 +205,10 @@ interface AppState {
 
   signatureLibrary: SavedSignature[]
   signatureDialogOpen: boolean
-  /** The s1..s10 traced-SVG signature slots (sign pane). */
-  svgSignatures: SvgSignature[]
-  /** Stores an already-traced SVG (the sign pane composer does the tracing). */
-  addSvgSignatureAction(svg: string, aspect: number): void
+  /** The s1..s10 signature slots (sign pane) — traced vector or typed text. */
+  svgSignatures: SignatureSlot[]
+  /** Stores an already-built slot (the sign pane composer builds it — tracing for vector, nothing for text). */
+  addSignatureSlotAction(slot: SignatureSlot): void
   deleteSvgSignatureAction(index: number): void
   /** Start placing slot `index`'s signature as a draggable ghost. */
   beginSignatureStamp(index: number): void
@@ -809,18 +812,19 @@ export const useApp = create<AppState>((set, get) => {
       set({ commentEditor: null })
     },
 
-    addSvgSignatureAction(svg, aspect) {
+    addSignatureSlotAction(slot) {
       if (get().svgSignatures.length >= MAX_SIGNATURES) {
         set({ status: `all ${MAX_SIGNATURES} signature slots are full — delete one first` })
         return
       }
       set((s) => {
-        const list = [...s.svgSignatures, { svg, aspect }]
+        const list = [...s.svgSignatures, slot]
         saveSvgSignatures(list)
-        return {
-          svgSignatures: list,
-          status: `s${list.length} saved — ${formatBytes(new TextEncoder().encode(svg).length)}`,
-        }
+        const detail =
+          slot.kind === 'text'
+            ? slot.font
+            : formatBytes(new TextEncoder().encode(slot.svg).length)
+        return { svgSignatures: list, status: `s${list.length} saved — ${detail}` }
       })
     },
 
@@ -840,6 +844,31 @@ export const useApp = create<AppState>((set, get) => {
       const pageIndex = get().paneView(editorId).pageIndex
       const page = model.pages[pageIndex]
       if (!page) return
+
+      if (sig.kind === 'text') {
+        // no natural aspect for typed text — a plausible signature-strip
+        // box; height (via placeSignatureText's fontSize) does the work
+        const width = Math.min(220, page.width * 0.4)
+        const height = width / 3.4
+        set({
+          placement: {
+            paneId: editorId,
+            pageIndex,
+            rect: {
+              x: (page.width - width) / 2,
+              y: Math.max(40, page.height * 0.15),
+              w: width,
+              h: height,
+            },
+            dataUrl: '',
+            pngBytes: new Uint8Array(0),
+            aspect: width / height,
+            text: { text: sig.text, font: sig.font },
+          },
+        })
+        return
+      }
+
       const width = Math.min(180, page.width * 0.35)
       const height = width / sig.aspect
       set({
@@ -893,6 +922,26 @@ export const useApp = create<AppState>((set, get) => {
       const { placement } = get()
       if (!placement) return
       const { pageIndex, rect, pngBytes } = placement
+
+      if (placement.text) {
+        // typed signature: fetch a glyph-subset of the chosen Google
+        // Font (just the characters used) and embed it for real —
+        // never traced or rasterized
+        const { text, font } = placement.text
+        set({ status: 'embedding font …' })
+        let fontBytes: Uint8Array
+        try {
+          fontBytes = await fetchSignatureFontBytes(font, text)
+        } catch (err) {
+          set({ placement: null, status: `font embed error: ${(err as Error).message}` })
+          return
+        }
+        const ok = await commitViaReload(async () => {
+          await placeSignatureText(get().host!, pageIndex, text, fontBytes, rect)
+        }, `signature placed on page ${pageIndex + 1}`)
+        if (ok) set({ placement: null })
+        return
+      }
 
       if (placement.vector) {
         // traced signature: stroke the centerlines straight into the

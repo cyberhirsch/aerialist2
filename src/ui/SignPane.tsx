@@ -7,14 +7,8 @@ import {
 } from './googleFonts'
 import { Icon } from './icons'
 import { useApp } from './store'
-import { MAX_SIGNATURES } from './svgSignatures'
-import {
-  chainSetToSvg,
-  imageToChainSet,
-  renderTextToChainSet,
-  SVG_BYTE_LIMIT,
-  type ChainSet,
-} from './trace'
+import { MAX_SIGNATURES, type SignatureSlot } from './svgSignatures'
+import { chainSetToSvg, imageToChainSet, SVG_BYTE_LIMIT, type ChainSet } from './trace'
 
 type ComposeMode = 'import' | 'draw' | 'type' | null
 
@@ -39,16 +33,18 @@ function formatBytes(n: number): string {
 }
 
 /**
- * The sign pane: up to 10 signature slots (s1..s10), built three ways —
- * import an image, draw freehand, or type in a script font — each
- * centerline-traced to a compact SVG. A relax slider and thickness
- * dropdown adjust the trace live before it's saved to a slot. Slots
- * also appear as s1..sN quick stamps in the editor's fill mode.
+ * The sign pane: up to 10 signature slots (s1..s10), built three ways.
+ * Import and draw are centerline-traced to a compact SVG, with a relax
+ * slider and thickness dropdown to adjust the trace live before saving.
+ * Type is never traced — it's saved as plain text + a font name, and
+ * placed later as real embedded-font PDF text (see confirmPlacement),
+ * so it stays true type rather than a rasterized/traced approximation.
+ * Slots also appear as s1..sN quick stamps in the editor's fill mode.
  */
 export function SignPane() {
   const sigs = useApp((s) => s.svgSignatures)
   const busy = useApp((s) => s.busy)
-  const { addSvgSignatureAction, deleteSvgSignatureAction, setStatus } = useApp()
+  const { addSignatureSlotAction, deleteSvgSignatureAction, setStatus } = useApp()
   const [selected, setSelected] = useState(0)
 
   const [mode, setMode] = useState<ComposeMode>(null)
@@ -187,39 +183,29 @@ export function SignPane() {
 
   /* ── type ── */
 
+  // load the font for the live preview only — typed signatures are
+  // never traced, so there's no chainSet/preview pipeline to run here
   useEffect(() => {
     if (mode !== 'type') return
-    if (!text.trim()) {
-      setChainSet(null)
-      return
-    }
-    let cancelled = false
-    const t = setTimeout(async () => {
-      try {
-        await ensureSignatureFont(font)
-        if (cancelled) return
-        const cs = renderTextToChainSet(text, font)
-        if (cancelled) return
-        setChainSet(cs)
-        applyAutoThickness(cs)
-      } catch (err) {
-        if (!cancelled) setStatus(`font error: ${(err as Error).message}`)
-      }
-    }, 300)
-    return () => {
-      cancelled = true
-      clearTimeout(t)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, text, font])
+    ensureSignatureFont(font).catch((err: Error) => setStatus(`font error: ${err.message}`))
+  }, [mode, font, setStatus])
 
   /* ── save ── */
 
-  const handleSave = () => {
-    if (!preview) return
-    addSvgSignatureAction(preview.svg, preview.aspect)
+  const saveSlot = (slot: SignatureSlot) => {
+    addSignatureSlotAction(slot)
     setSelected(Number.MAX_SAFE_INTEGER) // clamped to the new last slot below
     cancelCompose()
+  }
+
+  const handleSaveTrace = () => {
+    if (!preview) return
+    saveSlot({ kind: 'vector', svg: preview.svg, aspect: preview.aspect })
+  }
+
+  const handleSaveText = () => {
+    if (!text.trim()) return
+    saveSlot({ kind: 'text', text: text.trim(), font })
   }
 
   return (
@@ -374,12 +360,35 @@ export function SignPane() {
               </button>
             </div>
             {text.trim() && (
-              <div
-                className="border border-ink-3 bg-white px-3 py-4 text-3xl text-black"
-                style={{ fontFamily: `"${font}"` }}
-              >
-                {text}
-              </div>
+              <>
+                <div
+                  className="border border-ink-3 bg-white px-3 py-4 text-3xl text-black"
+                  style={{ fontFamily: `"${font}"` }}
+                >
+                  {text}
+                </div>
+                <div className="text-ink-4">
+                  placed as real text in {font} — not traced or rasterized
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSaveText}
+                    disabled={busy || slotsFull}
+                    title={`save as s${sigs.length + 1}`}
+                    className="flex items-center gap-1 border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2 disabled:opacity-40"
+                  >
+                    <Icon name="sign" size={14} />
+                    save as s{sigs.length + 1}
+                  </button>
+                  <button
+                    onClick={cancelCompose}
+                    className="flex items-center gap-1 border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2"
+                  >
+                    <Icon name="close" size={14} />
+                    cancel
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -433,7 +442,7 @@ export function SignPane() {
             </label>
             <div className="flex gap-2">
               <button
-                onClick={handleSave}
+                onClick={handleSaveTrace}
                 disabled={busy || slotsFull}
                 title={`save as s${sigs.length + 1}`}
                 className="flex items-center gap-1 border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2 disabled:opacity-40"
@@ -453,37 +462,14 @@ export function SignPane() {
         )}
 
         {mode === null && sel && (
-          <div className="flex flex-col gap-2">
-            <div
-              className="border border-ink-3 bg-white p-2"
-              dangerouslySetInnerHTML={{
-                __html: sel.svg.replace(
-                  '<svg ',
-                  '<svg style="display:block;width:100%;height:auto" ',
-                ),
-              }}
-            />
-            <div className="flex items-center gap-2 text-ink-4">
-              <span>
-                s{selIndex + 1} · {formatBytes(new TextEncoder().encode(sel.svg).length)} · svg
-                centerline trace
-              </span>
-              <span className="flex-1" />
-              <button
-                onClick={() => {
-                  deleteSvgSignatureAction(selIndex)
-                  setSelected(Math.max(0, selIndex - 1))
-                }}
-                title={`delete s${selIndex + 1}`}
-                className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6"
-              >
-                <Icon name="delete" size={14} />
-              </button>
-            </div>
-            <div className="text-ink-4">
-              place it from the editor: enable the fill tool, then press s{selIndex + 1}.
-            </div>
-          </div>
+          <SlotPreview
+            slot={sel}
+            index={selIndex}
+            onDelete={() => {
+              deleteSvgSignatureAction(selIndex)
+              setSelected(Math.max(0, selIndex - 1))
+            }}
+          />
         )}
 
         {mode === null && !sel && (
@@ -492,9 +478,10 @@ export function SignPane() {
 │                              │
 │   no signatures yet.         │
 │                              │
-│   import, draw, or type      │
-│   above to trace one to      │
-│   svg (max 6 kb).            │
+│   import or draw to trace    │
+│   one to svg (max 6 kb),     │
+│   or type to place real      │
+│   text in a script font.     │
 │                              │
 └──────────────────────────────┘`}</pre>
           </div>
@@ -511,6 +498,56 @@ export function SignPane() {
           e.target.value = ''
         }}
       />
+    </div>
+  )
+}
+
+/** A saved slot's preview + delete — branches on vector vs. typed text. */
+function SlotPreview({ slot, index, onDelete }: {
+  slot: SignatureSlot
+  index: number
+  onDelete: () => void
+}) {
+  useEffect(() => {
+    if (slot.kind === 'text') ensureSignatureFont(slot.font).catch(() => {})
+  }, [slot])
+
+  return (
+    <div className="flex flex-col gap-2">
+      {slot.kind === 'vector' ? (
+        <div
+          className="border border-ink-3 bg-white p-2"
+          dangerouslySetInnerHTML={{
+            __html: slot.svg.replace('<svg ', '<svg style="display:block;width:100%;height:auto" '),
+          }}
+        />
+      ) : (
+        <div
+          className="border border-ink-3 bg-white px-3 py-4 text-3xl text-black"
+          style={{ fontFamily: `"${slot.font}"` }}
+        >
+          {slot.text}
+        </div>
+      )}
+      <div className="flex items-center gap-2 text-ink-4">
+        <span>
+          s{index + 1} ·{' '}
+          {slot.kind === 'vector'
+            ? `${formatBytes(new TextEncoder().encode(slot.svg).length)} · svg centerline trace`
+            : `${slot.font} · real text`}
+        </span>
+        <span className="flex-1" />
+        <button
+          onClick={onDelete}
+          title={`delete s${index + 1}`}
+          className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6"
+        >
+          <Icon name="delete" size={14} />
+        </button>
+      </div>
+      <div className="text-ink-4">
+        place it from the editor: enable the fill tool, then press s{index + 1}.
+      </div>
     </div>
   )
 }

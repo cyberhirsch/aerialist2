@@ -5,6 +5,7 @@
  * The UI must not import this directly — it goes through src/model.
  */
 
+import fontkit from '@pdf-lib/fontkit'
 import {
   PDFArray,
   PDFCheckBox,
@@ -87,6 +88,7 @@ export interface CommentAnnotation {
 
 export class PdfHost {
   readonly doc: PDFDocument
+  private fontkitRegistered = false
 
   private constructor(doc: PDFDocument) {
     this.doc = doc
@@ -250,14 +252,29 @@ export class PdfHost {
    * re-derive the model from fresh save() bytes afterward, which then
    * lets our own content-stream parser pick this text up as a normal
    * editable word/line going forward.
+   *
+   * `customFontBytes` (TTF/OTF/WOFF/WOFF2, e.g. from a fetched Google
+   * Font) embeds and uses that font instead of standard Helvetica —
+   * how typed signatures keep their chosen script look as real text
+   * rather than a traced/rasterized approximation.
    */
   async embedText(
     pageIndex: number,
     text: string,
     rect: { x: number; y: number; w: number; h: number },
     fontSize: number,
+    customFontBytes?: Uint8Array,
   ): Promise<void> {
-    const font = await this.doc.embedFont(StandardFonts.Helvetica)
+    let font: PDFFont
+    if (customFontBytes) {
+      if (!this.fontkitRegistered) {
+        this.doc.registerFontkit(fontkit)
+        this.fontkitRegistered = true
+      }
+      font = await this.doc.embedFont(customFontBytes, { subset: true })
+    } else {
+      font = await this.doc.embedFont(StandardFonts.Helvetica)
+    }
     const page = this.doc.getPage(pageIndex)
     page.drawText(text, {
       x: rect.x,
