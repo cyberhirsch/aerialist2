@@ -1,11 +1,16 @@
 /**
- * Centerline tracer: turns a raster signature image into a compact SVG
- * of stroked centerline paths (the pen's path, not an outline trace).
+ * Centerline tracer: turns raster ink (an imported image, or typed text
+ * rendered to a canvas) into a compact SVG of stroked centerline paths
+ * (the pen's path, not an outline trace). Freehand-drawn signatures skip
+ * straight to the same simplify/emit stage, since pointer input is
+ * already a centerline.
  *
  * Pipeline: alpha-aware Otsu threshold → Zhang-Suen thinning down to a
- * 1px skeleton → chain peeling into polylines → Douglas-Peucker
+ * 1px skeleton → spur pruning → chain peeling into polylines (this half
+ * is `skeletonToChains`, the expensive part) → Douglas-Peucker
  * simplification, retried with a coarser tolerance until the SVG fits
- * the byte budget. All custom TS, no dependencies.
+ * the byte budget (`chainSetToSvg`, cheap enough to re-run live as a UI
+ * slider moves). All custom TS, no dependencies.
  */
 
 export const SVG_BYTE_LIMIT = 6 * 1024
@@ -21,6 +26,15 @@ export interface TraceResult {
 
 type Point = [number, number]
 
+/** Unsimplified centerline polylines awaiting relax/thickness/emit. */
+export interface ChainSet {
+  chains: Point[][]
+  w: number
+  h: number
+  /** Estimated pen thickness in view-box units (ink area / skeleton length). */
+  strokeWidth: number
+}
+
 /* ── canvas front end ────────────────────────────────────────── */
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -30,28 +44,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error('could not load image'))
     img.src = src
   })
-}
-
-/** Trace an image (any data URL the browser can decode) to SVG. */
-export async function traceImageToSvg(
-  dataUrl: string,
-  maxBytes = SVG_BYTE_LIMIT,
-): Promise<TraceResult> {
-  const img = await loadImage(dataUrl)
-  const w0 = img.naturalWidth || 1
-  const h0 = img.naturalHeight || 1
-  // enough resolution for a faithful skeleton, small enough to thin fast
-  const scale = Math.min(1, 700 / Math.max(w0, h0))
-  const w = Math.max(1, Math.round(w0 * scale))
-  const h = Math.max(1, Math.round(h0 * scale))
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('no 2d context')
-  ctx.drawImage(img, 0, 0, w, h)
-  const mask = binarize(ctx.getImageData(0, 0, w, h))
-  return traceMask(mask, w, h, maxBytes)
 }
 
 /** Ink mask from image data: composite on white, Otsu threshold. */
@@ -95,6 +87,63 @@ function otsu(hist: Uint32Array, total: number): number {
     }
   }
   return threshold
+}
+
+/** Trace whatever's currently drawn on a canvas (white bg, dark ink). */
+export function canvasToChainSet(canvas: HTMLCanvasElement): ChainSet {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d context')
+  const mask = binarize(ctx.getImageData(0, 0, canvas.width, canvas.height))
+  return skeletonToChains(mask, canvas.width, canvas.height)
+}
+
+/** Trace an image (any data URL the browser can decode) to a chain set. */
+export async function imageToChainSet(dataUrl: string, maxDim = 700): Promise<ChainSet> {
+  const img = await loadImage(dataUrl)
+  const w0 = img.naturalWidth || 1
+  const h0 = img.naturalHeight || 1
+  // enough resolution for a faithful skeleton, small enough to thin fast
+  const scale = Math.min(1, maxDim / Math.max(w0, h0))
+  const w = Math.max(1, Math.round(w0 * scale))
+  const h = Math.max(1, Math.round(h0 * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d context')
+  ctx.drawImage(img, 0, 0, w, h)
+  return canvasToChainSet(canvas)
+}
+
+/** Render text in a loaded font to a chain set (caller ensures the font is ready). */
+export function renderTextToChainSet(text: string, fontFamily: string, size = 80): ChainSet {
+  const measure = document.createElement('canvas').getContext('2d')
+  if (!measure) throw new Error('no 2d context')
+  measure.font = `${size}px "${fontFamily}"`
+  const width = Math.max(80, Math.ceil(measure.measureText(text || ' ').width) + size)
+  const height = Math.round(size * 2)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d context')
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, width, height)
+  ctx.fillStyle = '#000'
+  ctx.font = `${size}px "${fontFamily}"`
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, size / 2, height / 2)
+  return canvasToChainSet(canvas)
+}
+
+/** Trace an image straight to a size-capped SVG (import, one-shot). */
+export async function traceImageToSvg(
+  dataUrl: string,
+  maxBytes = SVG_BYTE_LIMIT,
+): Promise<TraceResult> {
+  const set = await imageToChainSet(dataUrl)
+  return chainSetToSvg(set, { maxBytes })
 }
 
 /* ── skeleton (Zhang-Suen thinning) ──────────────────────────── */
@@ -235,7 +284,6 @@ function extractChains(skel: Uint8Array, w: number, h: number): Point[][] {
     return d
   }
 
-  // isolated pixels are real ink (the dot on an i) — keep them as dots
   const chains: Point[][] = []
 
   const walk = (sx: number, sy: number): Point[] => {
@@ -288,6 +336,52 @@ function extractChains(skel: Uint8Array, w: number, h: number): Point[][] {
     }
   }
   return chains
+}
+
+/** Threshold → thin → prune → peel: the expensive, non-interactive half. */
+export function skeletonToChains(mask: Uint8Array, w: number, h: number): ChainSet {
+  let inkCount = 0
+  for (let i = 0; i < mask.length; i++) inkCount += mask[i]
+  if (inkCount === 0) throw new Error('no ink found to trace')
+
+  const skel = mask.slice()
+  thin(skel, w, h)
+  let skelCount = 0
+  for (let i = 0; i < skel.length; i++) skelCount += skel[i]
+  if (skelCount === 0) throw new Error('no strokes survived thinning')
+
+  // ink area / centerline length ≈ average stroke thickness
+  const strokeWidth = Math.min(8, Math.max(1.25, inkCount / skelCount))
+
+  pruneSpurs(skel, w, h, Math.max(4, Math.round(strokeWidth * 2)))
+
+  // pixels isolated in the skeleton are real dots (the dot on an i);
+  // single pixels orphaned later, during chain peeling at staircase
+  // corners, are noise and must not survive as fake dots
+  const isolated = new Set<number>()
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x
+      if (!skel[i]) continue
+      let d = 0
+      for (const [dx, dy] of N8) if (skel[(y + dy) * w + x + dx]) d++
+      if (d === 0) isolated.add(i)
+    }
+  }
+
+  const chains = extractChains(skel, w, h)
+  const paths: Point[][] = []
+  for (const chain of chains) {
+    if (chain.length === 1) {
+      // a zero-length segment still draws as a dot via the round cap
+      const [x, y] = chain[0]
+      if (isolated.has(y * w + x)) paths.push([[x, y], [x + 0.01, y]])
+      continue
+    }
+    if (pathLength(chain) >= strokeWidth * 1.5) paths.push(chain)
+  }
+
+  return { chains: paths, w, h, strokeWidth }
 }
 
 /* ── simplification (Ramer-Douglas-Peucker) ──────────────────── */
@@ -343,83 +437,61 @@ function buildSvg(paths: Point[][], w: number, h: number, strokeWidth: number): 
 
 const byteLength = (s: string): number => new TextEncoder().encode(s).length
 
-/* ── pure core (canvas-free, unit-testable) ──────────────────── */
-
-/** Trace a binary ink mask to a size-capped SVG. */
-export function traceMask(
-  mask: Uint8Array,
-  w: number,
-  h: number,
-  maxBytes = SVG_BYTE_LIMIT,
-): TraceResult {
-  let inkCount = 0
-  for (let i = 0; i < mask.length; i++) inkCount += mask[i]
-  if (inkCount === 0) throw new Error('no ink found to trace')
-
-  const skel = mask.slice()
-  thin(skel, w, h)
-  let skelCount = 0
-  for (let i = 0; i < skel.length; i++) skelCount += skel[i]
-  if (skelCount === 0) throw new Error('no strokes survived thinning')
-
-  // ink area / centerline length ≈ average stroke thickness
-  const strokeWidth = Math.min(8, Math.max(1.25, inkCount / skelCount))
-
-  pruneSpurs(skel, w, h, Math.max(4, Math.round(strokeWidth * 2)))
-
-  // pixels isolated in the skeleton are real dots (the dot on an i);
-  // single pixels orphaned later, during chain peeling at staircase
-  // corners, are noise and must not survive as fake dots
-  const isolated = new Set<number>()
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x
-      if (!skel[i]) continue
-      let d = 0
-      for (const [dx, dy] of N8) if (skel[(y + dy) * w + x + dx]) d++
-      if (d === 0) isolated.add(i)
-    }
-  }
-
-  const chains = extractChains(skel, w, h)
-  const paths: Point[][] = []
-  for (const chain of chains) {
-    if (chain.length === 1) {
-      // a zero-length segment still draws as a dot via the round cap
-      const [x, y] = chain[0]
-      if (isolated.has(y * w + x)) paths.push([[x, y], [x + 0.01, y]])
-      continue
-    }
-    if (pathLength(chain) >= strokeWidth * 1.5) paths.push(chain)
-  }
-
-  let svg = ''
-  let simplified = paths
-  for (let epsilon = 0.8; ; epsilon *= 1.6) {
-    simplified = paths.map((p) => rdp(p, epsilon)).filter((p) => p.length >= 2)
-    svg = buildSvg(simplified, w, h, strokeWidth)
-    if (byteLength(svg) <= maxBytes || epsilon > 64) break
-  }
-  // pathological fallback: shed the shortest strokes until it fits
-  while (byteLength(svg) > maxBytes && simplified.length > 1) {
-    simplified = [...simplified]
-      .sort((a, b) => pathLength(b) - pathLength(a))
-      .slice(0, Math.max(1, Math.floor(simplified.length * 0.8)))
-    svg = buildSvg(simplified, w, h, strokeWidth)
-  }
-
-  return {
-    svg,
-    aspect: w / h,
-    pathCount: simplified.length,
-    bytes: byteLength(svg),
-  }
-}
-
 function pathLength(p: Point[]): number {
   let len = 0
   for (let i = 1; i < p.length; i++) {
     len += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1])
   }
   return len
+}
+
+/**
+ * Simplify + emit: the cheap, interactive half — safe to re-run on
+ * every relax-slider tick or thickness change. `epsilon` is a floor,
+ * not a fixed value: if the requested tolerance still doesn't fit
+ * `maxBytes`, it escalates further (and, in the pathological case,
+ * sheds the shortest strokes) so the result never exceeds the budget.
+ */
+export function chainSetToSvg(
+  set: ChainSet,
+  opts: { epsilon?: number; strokeWidth?: number; maxBytes?: number } = {},
+): TraceResult {
+  const strokeWidth = opts.strokeWidth ?? set.strokeWidth
+  const maxBytes = opts.maxBytes ?? SVG_BYTE_LIMIT
+
+  // always apply the requested tolerance at least once — even when the
+  // unsimplified chains already fit the budget, the caller's epsilon
+  // (e.g. a relax-slider position) must still take visible effect
+  let epsilon = opts.epsilon ?? 0.8
+  let simplified = set.chains.map((p) => rdp(p, epsilon)).filter((p) => p.length >= 2)
+  let svg = buildSvg(simplified, set.w, set.h, strokeWidth)
+  while (byteLength(svg) > maxBytes && epsilon <= 64) {
+    epsilon *= 1.6
+    simplified = set.chains.map((p) => rdp(p, epsilon)).filter((p) => p.length >= 2)
+    svg = buildSvg(simplified, set.w, set.h, strokeWidth)
+  }
+  // pathological fallback: shed the shortest strokes until it fits
+  while (byteLength(svg) > maxBytes && simplified.length > 1) {
+    simplified = [...simplified]
+      .sort((a, b) => pathLength(b) - pathLength(a))
+      .slice(0, Math.max(1, Math.floor(simplified.length * 0.8)))
+    svg = buildSvg(simplified, set.w, set.h, strokeWidth)
+  }
+
+  return {
+    svg,
+    aspect: set.w / set.h,
+    pathCount: simplified.length,
+    bytes: byteLength(svg),
+  }
+}
+
+/** Trace a binary ink mask straight to a size-capped SVG (used by tests). */
+export function traceMask(
+  mask: Uint8Array,
+  w: number,
+  h: number,
+  maxBytes = SVG_BYTE_LIMIT,
+): TraceResult {
+  return chainSetToSvg(skeletonToChains(mask, w, h), { maxBytes })
 }

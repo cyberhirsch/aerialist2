@@ -23,7 +23,6 @@ import { findMatches, type SearchMatch } from '../model/search'
 import { placeImage, placeVectorStrokes } from '../model/signatureOps'
 import { placeText } from '../model/textOps'
 import { highlightRegion, redactRegion } from '../model/redactOps'
-import { traceImageToSvg } from './trace'
 import {
   loadSvgSignatures,
   MAX_SIGNATURES,
@@ -205,7 +204,8 @@ interface AppState {
   signatureDialogOpen: boolean
   /** The s1..s10 traced-SVG signature slots (sign pane). */
   svgSignatures: SvgSignature[]
-  addSvgSignatureAction(dataUrl: string): Promise<void>
+  /** Stores an already-traced SVG (the sign pane composer does the tracing). */
+  addSvgSignatureAction(svg: string, aspect: number): void
   deleteSvgSignatureAction(index: number): void
   /** Start placing slot `index`'s signature as a draggable ghost. */
   beginSignatureStamp(index: number): void
@@ -809,25 +809,19 @@ export const useApp = create<AppState>((set, get) => {
       set({ commentEditor: null })
     },
 
-    async addSvgSignatureAction(dataUrl) {
+    addSvgSignatureAction(svg, aspect) {
       if (get().svgSignatures.length >= MAX_SIGNATURES) {
         set({ status: `all ${MAX_SIGNATURES} signature slots are full — delete one first` })
         return
       }
-      set({ status: 'tracing centerline …' })
-      try {
-        const { svg, aspect, pathCount, bytes } = await traceImageToSvg(dataUrl)
-        set((s) => {
-          const list = [...s.svgSignatures, { svg, aspect }]
-          saveSvgSignatures(list)
-          return {
-            svgSignatures: list,
-            status: `s${list.length} traced — ${pathCount} stroke(s), ${formatBytes(bytes)}`,
-          }
-        })
-      } catch (err) {
-        set({ status: `trace error: ${(err as Error).message}` })
-      }
+      set((s) => {
+        const list = [...s.svgSignatures, { svg, aspect }]
+        saveSvgSignatures(list)
+        return {
+          svgSignatures: list,
+          status: `s${list.length} saved — ${formatBytes(new TextEncoder().encode(svg).length)}`,
+        }
+      })
     },
 
     deleteSvgSignatureAction(index) {
