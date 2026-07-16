@@ -70,7 +70,7 @@ export function SignaturePlacer({ paneId, pdfToCss }: { paneId: string; pdfToCss
             className="flex h-full w-full items-center overflow-hidden px-1 text-black select-none"
             style={{
               fontFamily: `"${placement.text.font}"`,
-              fontSize: css.height * 0.7,
+              fontSize: css.height * 0.85,
               lineHeight: 1.1,
               whiteSpace: 'nowrap',
             }}

@@ -848,8 +848,8 @@ export const useApp = create<AppState>((set, get) => {
       if (sig.kind === 'text') {
         // no natural aspect for typed text — a plausible signature-strip
         // box; height (via placeSignatureText's fontSize) does the work
-        const width = Math.min(220, page.width * 0.4)
-        const height = width / 3.4
+        const width = Math.min(240, page.width * 0.45)
+        const height = width / 2.6
         set({
           placement: {
             paneId: editorId,

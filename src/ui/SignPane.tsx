@@ -49,7 +49,7 @@ export function SignPane() {
 
   const [mode, setMode] = useState<ComposeMode>(null)
   const [chainSet, setChainSet] = useState<ChainSet | null>(null)
-  const [epsilon, setEpsilon] = useState(0.8)
+  const [smooth, setSmooth] = useState(0.4)
   const [strokeWidth, setStrokeWidth] = useState(2.5)
   const autoThicknessRef = useRef(true)
 
@@ -69,8 +69,8 @@ export function SignPane() {
   const sel = mode === null && selIndex >= 0 ? sigs[selIndex] : null
 
   const preview = useMemo(
-    () => (chainSet ? chainSetToSvg(chainSet, { epsilon, strokeWidth, maxBytes: SVG_BYTE_LIMIT }) : null),
-    [chainSet, epsilon, strokeWidth],
+    () => (chainSet ? chainSetToSvg(chainSet, { smooth, strokeWidth, maxBytes: SVG_BYTE_LIMIT }) : null),
+    [chainSet, smooth, strokeWidth],
   )
 
   const resetComposer = () => {
@@ -80,7 +80,7 @@ export function SignPane() {
     drawingRef.current = false
     pointsRef.current = []
     setText('')
-    setEpsilon(0.8)
+    setSmooth(0.4)
     setStrokeWidth(2.5)
     autoThicknessRef.current = true
   }
@@ -362,8 +362,8 @@ export function SignPane() {
             {text.trim() && (
               <>
                 <div
-                  className="border border-ink-3 bg-white px-3 py-4 text-3xl text-black"
-                  style={{ fontFamily: `"${font}"` }}
+                  className="border border-ink-3 bg-white px-4 py-6 text-black"
+                  style={{ fontFamily: `"${font}"`, fontSize: '3.5rem', lineHeight: 1.2 }}
                 >
                   {text}
                 </div>
@@ -413,14 +413,15 @@ export function SignPane() {
               relax
               <input
                 type="range"
-                min={0.2}
-                max={4}
-                step={0.2}
-                value={epsilon}
-                onChange={(e) => setEpsilon(Number(e.target.value))}
+                min={0}
+                max={1}
+                step={0.05}
+                value={smooth}
+                onChange={(e) => setSmooth(Number(e.target.value))}
                 className="flex-1"
+                title="smooths the curve — doesn't reduce points"
               />
-              <span className="w-8 text-right tabular-nums">{epsilon.toFixed(1)}</span>
+              <span className="w-8 text-right tabular-nums">{smooth.toFixed(2)}</span>
             </label>
             <label className="flex items-center gap-2 text-ink-4">
               thickness
@@ -523,8 +524,8 @@ function SlotPreview({ slot, index, onDelete }: {
         />
       ) : (
         <div
-          className="border border-ink-3 bg-white px-3 py-4 text-3xl text-black"
-          style={{ fontFamily: `"${slot.font}"` }}
+          className="border border-ink-3 bg-white px-4 py-6 text-black"
+          style={{ fontFamily: `"${slot.font}"`, fontSize: '3.5rem', lineHeight: 1.2 }}
         >
           {slot.text}
         </div>

@@ -384,8 +384,16 @@ export function skeletonToChains(mask: Uint8Array, w: number, h: number): ChainS
   return { chains: paths, w, h, strokeWidth }
 }
 
-/* ── simplification (Ramer-Douglas-Peucker) ──────────────────── */
+/* ── decimation (Ramer-Douglas-Peucker) ──────────────────────── */
 
+/**
+ * Point-count reduction, used only as an internal, automatic step to
+ * keep curve-fitting numerically stable and the file small — NOT what
+ * the relax slider controls (see smoothPoints for that). A raw traced
+ * skeleton can carry hundreds of pixel-level points per stroke; this
+ * culls the ones a straight line through their neighbors already
+ * approximates well, before the smoother/curve-fitter ever sees them.
+ */
 function rdp(points: Point[], epsilon: number): Point[] {
   if (points.length < 3) return points
   const keep = new Uint8Array(points.length)
@@ -417,17 +425,77 @@ function rdp(points: Point[], epsilon: number): Point[] {
   return points.filter((_, i) => keep[i])
 }
 
-/* ── SVG emit ────────────────────────────────────────────────── */
+/* ── smoothing (relax slider) ────────────────────────────────── */
 
-function fmt(n: number): string {
-  const r = Math.round(n * 10) / 10
-  return Number.isInteger(r) ? String(r) : r.toFixed(1)
+/**
+ * Round off jitter by nudging each interior point toward the midpoint
+ * of its neighbors — a genuine curve-smoothing pass, not a point-count
+ * reduction (the point count is unchanged; only positions move).
+ * `strength` in [0, 1] sets how far each point moves toward that
+ * midpoint per pass, run over a few fixed passes so it compounds into
+ * a visibly rounder curve at higher settings. Endpoints stay put so a
+ * stroke doesn't drift or shrink away from where it actually starts
+ * and ends.
+ */
+function smoothPoints(points: Point[], strength: number): Point[] {
+  if (strength <= 0 || points.length < 3) return points
+  const alpha = Math.min(1, strength) * 0.5
+  const PASSES = 3
+  let pts = points
+  for (let k = 0; k < PASSES; k++) {
+    const next: Point[] = [pts[0]]
+    for (let i = 1; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i - 1]
+      const [x1, y1] = pts[i]
+      const [x2, y2] = pts[i + 1]
+      next.push([x1 + ((x0 + x2) / 2 - x1) * alpha, y1 + ((y0 + y2) / 2 - y1) * alpha])
+    }
+    next.push(pts[pts.length - 1])
+    pts = next
+  }
+  return pts
 }
 
-function buildSvg(paths: Point[][], w: number, h: number, strokeWidth: number): string {
-  const d = paths
-    .map((p) => 'M' + p.map(([x, y], i) => `${i ? 'L' : ''}${fmt(x)} ${fmt(y)}`).join(''))
-    .join('')
+/* ── SVG emit (Catmull-Rom → cubic Bezier) ───────────────────── */
+
+function fmt(n: number): string {
+  const r = Math.round(n * 100) / 100
+  return Number.isInteger(r) ? String(r) : r.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+}
+
+/**
+ * Fit a smooth curve through every point via a Catmull-Rom spline,
+ * emitted as cubic Bezier (`C`) segments — an actually curved path
+ * between points, not a polyline pretending to be one. A 2-point path
+ * (including the zero-length segments dots are represented as) has no
+ * interior point to curve through, so it stays a straight `L`.
+ */
+function smoothPath(points: Point[]): string {
+  const p = points
+  const n = p.length
+  if (n < 2) return ''
+  const [x0, y0] = p[0]
+  if (n === 2) {
+    return `M${fmt(x0)} ${fmt(y0)}L${fmt(p[1][0])} ${fmt(p[1][1])}`
+  }
+  const at = (i: number): Point => p[Math.max(0, Math.min(n - 1, i))]
+  let d = `M${fmt(x0)} ${fmt(y0)}`
+  for (let i = 0; i < n - 1; i++) {
+    const [px0, py0] = at(i - 1)
+    const [px1, py1] = at(i)
+    const [px2, py2] = at(i + 1)
+    const [px3, py3] = at(i + 2)
+    const c1x = px1 + (px2 - px0) / 6
+    const c1y = py1 + (py2 - py0) / 6
+    const c2x = px2 - (px3 - px1) / 6
+    const c2y = py2 - (py3 - py1) / 6
+    d += `C${fmt(c1x)} ${fmt(c1y)} ${fmt(c2x)} ${fmt(c2y)} ${fmt(px2)} ${fmt(py2)}`
+  }
+  return d
+}
+
+function buildSmoothSvg(paths: Point[][], w: number, h: number, strokeWidth: number): string {
+  const d = paths.map(smoothPath).join('')
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">` +
     `<path fill="none" stroke="#000" stroke-width="${fmt(strokeWidth)}" ` +
@@ -446,42 +514,49 @@ function pathLength(p: Point[]): number {
 }
 
 /**
- * Simplify + emit: the cheap, interactive half — safe to re-run on
- * every relax-slider tick or thickness change. `epsilon` is a floor,
- * not a fixed value: if the requested tolerance still doesn't fit
- * `maxBytes`, it escalates further (and, in the pathological case,
- * sheds the shortest strokes) so the result never exceeds the budget.
+ * Smooth + emit: the cheap, interactive half — safe to re-run on every
+ * relax-slider tick or thickness change. `smooth` (0–1) controls curve
+ * rounding, not point count. Decimation is a separate, automatic step
+ * purely for numerical stability and the byte budget: it starts light
+ * and escalates (then, in the pathological case, sheds the shortest
+ * strokes) only if the smoothed+curved result still doesn't fit.
  */
 export function chainSetToSvg(
   set: ChainSet,
-  opts: { epsilon?: number; strokeWidth?: number; maxBytes?: number } = {},
+  opts: { smooth?: number; strokeWidth?: number; maxBytes?: number } = {},
 ): TraceResult {
   const strokeWidth = opts.strokeWidth ?? set.strokeWidth
   const maxBytes = opts.maxBytes ?? SVG_BYTE_LIMIT
+  const smooth = opts.smooth ?? 0.4
 
-  // always apply the requested tolerance at least once — even when the
-  // unsimplified chains already fit the budget, the caller's epsilon
-  // (e.g. a relax-slider position) must still take visible effect
-  let epsilon = opts.epsilon ?? 0.8
-  let simplified = set.chains.map((p) => rdp(p, epsilon)).filter((p) => p.length >= 2)
-  let svg = buildSvg(simplified, set.w, set.h, strokeWidth)
+  const render = (decimated: Point[][]) =>
+    buildSmoothSvg(
+      decimated.map((p) => smoothPoints(p, smooth)),
+      set.w,
+      set.h,
+      strokeWidth,
+    )
+
+  let epsilon = 0.6
+  let decimated = set.chains.map((p) => rdp(p, epsilon)).filter((p) => p.length >= 2)
+  let svg = render(decimated)
   while (byteLength(svg) > maxBytes && epsilon <= 64) {
     epsilon *= 1.6
-    simplified = set.chains.map((p) => rdp(p, epsilon)).filter((p) => p.length >= 2)
-    svg = buildSvg(simplified, set.w, set.h, strokeWidth)
+    decimated = set.chains.map((p) => rdp(p, epsilon)).filter((p) => p.length >= 2)
+    svg = render(decimated)
   }
   // pathological fallback: shed the shortest strokes until it fits
-  while (byteLength(svg) > maxBytes && simplified.length > 1) {
-    simplified = [...simplified]
+  while (byteLength(svg) > maxBytes && decimated.length > 1) {
+    decimated = [...decimated]
       .sort((a, b) => pathLength(b) - pathLength(a))
-      .slice(0, Math.max(1, Math.floor(simplified.length * 0.8)))
-    svg = buildSvg(simplified, set.w, set.h, strokeWidth)
+      .slice(0, Math.max(1, Math.floor(decimated.length * 0.8)))
+    svg = render(decimated)
   }
 
   return {
     svg,
     aspect: set.w / set.h,
-    pathCount: simplified.length,
+    pathCount: decimated.length,
     bytes: byteLength(svg),
   }
 }

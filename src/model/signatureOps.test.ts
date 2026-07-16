@@ -1,7 +1,7 @@
 import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 import { describe, expect, it } from 'vitest'
 import { loadDocumentModel } from './buildModel'
-import { placeImage, placeVectorStrokes } from './signatureOps'
+import { placeImage, placeVectorStrokes, type PathCommand } from './signatureOps'
 
 // a well-known minimal 1x1 transparent PNG
 const TINY_PNG_BASE64 =
@@ -70,17 +70,29 @@ describe('placeImage (signatures/initials/date stamps)', () => {
 
 describe('placeVectorStrokes (traced s1..s10 signatures)', () => {
   const strokes = {
-    // a V shape and a dot, in a 100×50 view box (y down)
+    // a V-shaped line path and a curved path (plus a dot), in a
+    // 100×50 view box (y down)
     paths: [
-      [[10, 10], [50, 40], [90, 10]],
-      [[95, 10], [95.01, 10]],
-    ] as [number, number][][],
+      [
+        { type: 'M', x: 10, y: 10 },
+        { type: 'L', x: 50, y: 40 },
+        { type: 'L', x: 90, y: 10 },
+      ],
+      [
+        { type: 'M', x: 20, y: 20 },
+        { type: 'C', x1: 25, y1: 15, x2: 35, y2: 15, x: 40, y: 20 },
+      ],
+      [
+        { type: 'M', x: 95, y: 10 },
+        { type: 'L', x: 95.01, y: 10 },
+      ],
+    ] as PathCommand[][],
     viewW: 100,
     viewH: 50,
     strokeWidth: 3,
   }
 
-  it('writes stroked paths into the content stream without touching text', async () => {
+  it('writes stroked paths (lines and curves) without touching text', async () => {
     const { host, model } = await loadDocumentModel(await makePdf())
     placeVectorStrokes(host, model, 0, strokes, { x: 100, y: 200, w: 200, h: 100 })
 
@@ -93,6 +105,8 @@ describe('placeVectorStrokes (traced s1..s10 signatures)', () => {
     expect(content).toContain('120 280 m')
     expect(content).toContain(' S')
     expect(content).toContain('1 J 1 j')
+    // the curve command survived as a real PDF cubic-Bezier operator
+    expect(content).toMatch(/[\d.]+ [\d.]+ [\d.]+ [\d.]+ [\d.]+ [\d.]+ c/)
   })
 
   it('survives save + reload with text and strokes intact', async () => {

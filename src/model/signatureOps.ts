@@ -36,13 +36,23 @@ export async function placeSignatureText(
   fontBytes: Uint8Array,
   rect: Rect,
 ): Promise<void> {
-  const fontSize = Math.max(6, Math.min(96, rect.h * 0.7))
+  const fontSize = Math.max(6, Math.min(140, rect.h * 0.85))
   await host.embedText(pageIndex, text, { x: rect.x, y: rect.y, w: rect.w, h: rect.h }, fontSize, fontBytes)
 }
 
-/** Polyline strokes in a y-down view box (as traced from an image). */
+/**
+ * One command in a stroked path, in a y-down view box (as traced from
+ * an image): a straight move/line, or a cubic Bezier curve — the same
+ * control-point convention SVG's `C` and PDF's `c` operators both use,
+ * so placing one is a direct per-point coordinate transform, no curve
+ * conversion needed.
+ */
+export type PathCommand =
+  | { type: 'M' | 'L'; x: number; y: number }
+  | { type: 'C'; x1: number; y1: number; x2: number; y2: number; x: number; y: number }
+
 export interface VectorStrokes {
-  paths: [number, number][][]
+  paths: PathCommand[][]
   viewW: number
   viewH: number
   strokeWidth: number
@@ -68,11 +78,13 @@ export function placeVectorStrokes(
     `q 1 J 1 j 0 0 0 RG ${fmt(strokes.strokeWidth * (sx + sy) / 2)} w`,
   ]
   for (const path of strokes.paths) {
-    ops.push(
-      path
-        .map(([x, y], i) => `${fmt(tx(x))} ${fmt(ty(y))} ${i ? 'l' : 'm'}`)
-        .join(' ') + ' S',
-    )
+    const parts = path.map((cmd) => {
+      if (cmd.type === 'C') {
+        return `${fmt(tx(cmd.x1))} ${fmt(ty(cmd.y1))} ${fmt(tx(cmd.x2))} ${fmt(ty(cmd.y2))} ${fmt(tx(cmd.x))} ${fmt(ty(cmd.y))} c`
+      }
+      return `${fmt(tx(cmd.x))} ${fmt(ty(cmd.y))} ${cmd.type === 'M' ? 'm' : 'l'}`
+    })
+    ops.push(parts.join(' ') + ' S')
   }
   ops.push('Q')
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { PathCommand } from '../model/signatureOps'
 import { parseSignatureSvg } from './svgSignatures'
 import { SVG_BYTE_LIMIT, traceMask } from './trace'
 
@@ -10,6 +11,9 @@ function makeMask(w: number, h: number, paint: (set: (x: number, y: number) => v
   })
   return mask
 }
+
+/** Every command's terminal (x, y) — M/L/C all end at one. */
+const endpoints = (path: PathCommand[]): [number, number][] => path.map((c) => [c.x, c.y])
 
 describe('traceMask (centerline tracing)', () => {
   it('reduces a thick horizontal bar to one centerline stroke', () => {
@@ -27,7 +31,7 @@ describe('traceMask (centerline tracing)', () => {
 
     // the traced stroke runs the bar's length near its vertical center
     const strokes = parseSignatureSvg(result.svg)!
-    const pts = strokes.paths[0]
+    const pts = endpoints(strokes.paths[0])
     const xs = pts.map(([x]) => x)
     const ys = pts.map(([, y]) => y)
     expect(Math.min(...xs)).toBeLessThan(16)

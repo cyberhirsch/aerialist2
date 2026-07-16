@@ -1,14 +1,15 @@
 /**
  * The s1..s10 signature slots, persisted in localStorage. Two kinds:
- *  - vector: a centerline-traced SVG (drawn/imported), under the 6 KB
- *    budget enforced by the tracer. parseSignatureSvg turns our own
- *    emitted markup back into plain polyline data for vector placement.
+ *  - vector: a centerline-traced, curve-smoothed SVG (drawn/imported),
+ *    under the 6 KB budget enforced by the tracer. parseSignatureSvg
+ *    turns our own emitted markup back into path commands for vector
+ *    placement (real PDF Bezier curves, not a polyline).
  *  - text: a typed signature — just the string and the chosen Google
  *    Font name. Never traced; placed as real embedded-font PDF text
  *    (see googleFonts.fetchSignatureFontBytes + PdfHost.embedText).
  */
 
-import type { VectorStrokes } from '../model/signatureOps'
+import type { PathCommand, VectorStrokes } from '../model/signatureOps'
 import type { SignatureFont } from './googleFonts'
 
 export const MAX_SIGNATURES = 10
@@ -62,26 +63,46 @@ export function saveSvgSignatures(list: SignatureSlot[]): void {
 }
 
 /**
- * Parse the tracer's SVG back into polylines. Only understands the
- * exact shape buildSvg emits (one path, absolute M/L commands) — which
- * is fine, because these SVGs are always our own output.
+ * Parse the tracer's SVG back into path commands (M/L/C). Only
+ * understands the exact shape buildSmoothSvg emits (one path, absolute
+ * commands, no other letters) — which is fine, because these SVGs are
+ * always our own output.
  */
 export function parseSignatureSvg(svg: string): VectorStrokes | null {
   const vb = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg)
-  const d = /\bd="([^"]+)"/.exec(svg)
+  const dAttr = /\bd="([^"]+)"/.exec(svg)
   const sw = /stroke-width="([\d.]+)"/.exec(svg)
-  if (!vb || !d) return null
+  if (!vb || !dAttr) return null
 
-  const paths: [number, number][][] = []
-  for (const sub of d[1].split('M')) {
-    if (!sub.trim()) continue
-    const points: [number, number][] = []
-    for (const pair of sub.split('L')) {
-      const [x, y] = pair.trim().split(/\s+/).map(Number)
-      if (Number.isFinite(x) && Number.isFinite(y)) points.push([x, y])
+  const tokens = dAttr[1].match(/[MLC][^MLC]*/g)
+  if (!tokens) return null
+
+  const paths: PathCommand[][] = []
+  let current: PathCommand[] = []
+  for (const tok of tokens) {
+    const type = tok[0] as 'M' | 'L' | 'C'
+    const n = tok
+      .slice(1)
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(Number)
+    if (type === 'M') {
+      if (current.length >= 2) paths.push(current)
+      if (!Number.isFinite(n[0]) || !Number.isFinite(n[1])) {
+        current = []
+        continue
+      }
+      current = [{ type: 'M', x: n[0], y: n[1] }]
+    } else if (type === 'L') {
+      if (Number.isFinite(n[0]) && Number.isFinite(n[1])) {
+        current.push({ type: 'L', x: n[0], y: n[1] })
+      }
+    } else if (n.length >= 6 && n.every(Number.isFinite)) {
+      current.push({ type: 'C', x1: n[0], y1: n[1], x2: n[2], y2: n[3], x: n[4], y: n[5] })
     }
-    if (points.length >= 2) paths.push(points)
   }
+  if (current.length >= 2) paths.push(current)
   if (paths.length === 0) return null
 
   return {
