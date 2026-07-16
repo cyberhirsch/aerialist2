@@ -89,12 +89,15 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
   const busy = useApp((s) => s.busy)
   const commentPlacementActive = useApp((s) => s.commentPlacementActive)
   const redactPlacementActive = useApp((s) => s.redactPlacementActive)
-  const view = useApp((s) => s.paneViews[pane.id])
+  const highlightPlacementActive = useApp((s) => s.highlightPlacementActive)
+  const fillPlacementActive = useApp((s) => s.fillPlacementActive)
   const {
     focusPane, splitPaneAction, closePaneAction, setPaneKindAction, layout,
-    setEditMode, openSignatureDialog, openFillDialog, startPlacingComment,
-    startRedaction, cancelRedaction, setFitMode, setPage, setZoom,
+    setEditMode, openSignatureDialog, startFillPlacement, cancelFillPlacement,
+    startPlacingComment, startRedaction, cancelRedaction,
+    startHighlight, cancelHighlight, setFitMode, setPage, setZoom,
   } = useApp()
+  const view = useApp((s) => s.paneViews[pane.id])
   const focused = focusedPaneId === pane.id
   const isOnlyPane = layout.type === 'pane'
   const { pageIndex, zoom, fitMode, editMode } = view ?? { pageIndex: 0, zoom: 1, fitMode: null, editMode: 'auto' }
@@ -102,7 +105,6 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
   const modeMenuBtn = useRef<HTMLButtonElement>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [editToolOpen, setEditToolOpen] = useState(false)
-  const [fillToolOpen, setFillToolOpen] = useState(false)
   const modeMenuItems: MenuItem[] = EDIT_MODES.map((m) => ({
     label: `${m === editMode ? '› ' : '  '}${EDIT_MODE_LABEL[m]}`,
     action: () => setEditMode(pane.id, m),
@@ -170,23 +172,19 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
               </>
             )}
 
-            {/* fill: sign is a sub-option that only shows while this tool is enabled */}
+            {/* fill: click the page and type; sign shows while enabled */}
             <button
-              onClick={() => {
-                const next = !fillToolOpen
-                setFillToolOpen(next)
-                if (next) openFillDialog()
-              }}
+              onClick={() => (fillPlacementActive ? cancelFillPlacement() : startFillPlacement())}
               disabled={!model || busy}
-              title="fill — place text anywhere on the page"
+              title="fill — click anywhere on the page and type"
               className={
                 'px-1 disabled:opacity-30 ' +
-                (fillToolOpen ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
+                (fillPlacementActive ? 'bg-ink-2 text-ink-6' : 'text-ink-4 hover:bg-ink-2 hover:text-ink-6')
               }
             >
               <Icon name="border-color" size={14} />
             </button>
-            {fillToolOpen && (
+            {fillPlacementActive && (
               <button
                 onClick={openSignatureDialog}
                 disabled={!model || busy}
@@ -210,9 +208,21 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
             </button>
 
             <button
+              onClick={() => (highlightPlacementActive ? cancelHighlight() : startHighlight())}
+              disabled={!model || busy}
+              title="highlight — drag over text like a marker"
+              className={
+                'px-1 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30 ' +
+                (highlightPlacementActive ? 'bg-ink-2 text-ink-6' : 'text-ink-4')
+              }
+            >
+              <Icon name="highlighter" size={14} />
+            </button>
+
+            <button
               onClick={() => (redactPlacementActive ? cancelRedaction() : startRedaction())}
               disabled={!model || busy}
-              title="redact — drag a box; text under it is removed from the file and the area is covered"
+              title="redact — drag over text; it is removed from the file and barred out"
               className={
                 'px-1 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30 ' +
                 (redactPlacementActive ? 'bg-ink-2 text-ink-6' : 'text-ink-4')

@@ -22,10 +22,10 @@ import { setFormFieldValue } from '../model/formOps'
 import { findMatches, type SearchMatch } from '../model/search'
 import { placeImage } from '../model/signatureOps'
 import { placeText } from '../model/textOps'
-import { redactRegion } from '../model/redactOps'
+import { highlightRegion, redactRegion } from '../model/redactOps'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
-import { renderTextSignature, transformJpegBytes } from './imageUtils'
+import { transformJpegBytes } from './imageUtils'
 import {
   loadSignatureLibrary,
   saveSignatureLibrary,
@@ -82,10 +82,8 @@ export interface PaneView {
 }
 
 /**
- * A signature/initials/date-stamp image, or free-typed text, being
- * positioned before it's embedded. `kind` defaults to 'image' — the
- * drag/resize/place UX (SignaturePlacer) is identical for both; only
- * what gets embedded on confirm differs.
+ * A signature/initials/date-stamp image being positioned before it's
+ * embedded (drag to move, corner-drag to resize — see SignaturePlacer).
  */
 export interface SignaturePlacement {
   paneId: string
@@ -94,8 +92,14 @@ export interface SignaturePlacement {
   dataUrl: string
   pngBytes: Uint8Array
   aspect: number
-  kind?: 'image' | 'text'
-  text?: string
+}
+
+/** An inline fill-text editor pinned to a spot on the page. */
+export interface FillEditorState {
+  paneId: string
+  pageIndex: number
+  /** Text baseline origin, PDF user space. */
+  point: { x: number; y: number }
 }
 
 /** The comment editor popup — open for a new marker or an existing one. */
@@ -199,21 +203,34 @@ interface AppState {
   addSavedSignature(kind: SignatureKind, label: string, dataUrl: string, aspect: number): void
   deleteSavedSignature(id: string): void
 
-  fillDialogOpen: boolean
-  openFillDialog(): void
-  closeFillDialog(): void
-  beginTextPlacement(text: string): void
+  /**
+   * Fill: click anywhere on the page and type — the text is committed
+   * straight into the content stream on enter, no dialog.
+   */
+  fillPlacementActive: boolean
+  fillEditor: FillEditorState | null
+  startFillPlacement(): void
+  cancelFillPlacement(): void
+  openFillEditor(paneId: string, pageIndex: number, point: { x: number; y: number }): void
+  closeFillEditor(): void
+  placeFillTextAction(text: string): Promise<void>
 
   commentPlacementActive: boolean
   commentEditor: CommentEditorState | null
   startPlacingComment(): void
   cancelPlacingComment(): void
 
-  /** Redaction: drag a box in the editor to remove content under it. */
+  /** Redaction: drag over text to remove it and bar the lines out. */
   redactPlacementActive: boolean
   startRedaction(): void
   cancelRedaction(): void
   redactRegionAction(pageIndex: number, rect: Rect): Promise<void>
+
+  /** Highlight: drag over text to paint marker bars under it. */
+  highlightPlacementActive: boolean
+  startHighlight(): void
+  cancelHighlight(): void
+  highlightRegionAction(pageIndex: number, rect: Rect): Promise<void>
   openCommentEditor(
     paneId: string,
     pageIndex: number,
@@ -246,6 +263,9 @@ interface AppState {
 
 /** Cap on kept snapshots — one full PDF per edit. */
 const HISTORY_LIMIT = 30
+
+/** Point size for text placed with the fill tool. */
+const FILL_FONT_SIZE = 12
 
 function downloadBytes(bytes: Uint8Array, filename: string): void {
   const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: 'application/pdf' })
@@ -448,10 +468,12 @@ export const useApp = create<AppState>((set, get) => {
     signatureLibrary: loadSignatureLibrary(),
     signatureDialogOpen: false,
     placement: null,
-    fillDialogOpen: false,
+    fillPlacementActive: false,
+    fillEditor: null,
     commentPlacementActive: false,
     commentEditor: null,
     redactPlacementActive: false,
+    highlightPlacementActive: false,
 
     searchQuery: '',
     searchCaseSensitive: false,
@@ -624,49 +646,53 @@ export const useApp = create<AppState>((set, get) => {
       set({ signatureDialogOpen: false })
     },
 
-    openFillDialog() {
-      set({ fillDialogOpen: true })
-    },
-
-    closeFillDialog() {
-      set({ fillDialogOpen: false })
-    },
-
-    beginTextPlacement(text) {
-      const editorId = get().targetEditorPaneId()
-      const { model } = get()
-      if (!editorId || !model) return
-      const pageIndex = get().paneView(editorId).pageIndex
-      const page = model.pages[pageIndex]
-      if (!page) return
-      // only the aspect ratio is used — the rendered dataUrl is discarded,
-      // SignaturePlacer shows live text instead of this raster preview
-      const { aspect } = renderTextSignature(text, '24px "Cascadia Mono", monospace')
-      const width = Math.min(240, page.width * 0.5)
-      const height = width / aspect
-      const rect: Rect = {
-        x: (page.width - width) / 2,
-        y: (page.height - height) / 2,
-        w: width,
-        h: height,
-      }
+    startFillPlacement() {
       set({
-        fillDialogOpen: false,
-        placement: {
-          paneId: editorId,
-          pageIndex,
-          rect,
-          dataUrl: '',
-          pngBytes: new Uint8Array(0),
-          aspect,
-          kind: 'text',
-          text,
-        },
+        fillPlacementActive: true,
+        commentPlacementActive: false,
+        redactPlacementActive: false,
+        highlightPlacementActive: false,
       })
     },
 
+    cancelFillPlacement() {
+      set({ fillPlacementActive: false, fillEditor: null })
+    },
+
+    openFillEditor(paneId, pageIndex, point) {
+      set({ fillEditor: { paneId, pageIndex, point } })
+    },
+
+    closeFillEditor() {
+      set({ fillEditor: null })
+    },
+
+    async placeFillTextAction(text) {
+      const editor = get().fillEditor
+      const trimmed = text.trim()
+      set({ fillEditor: null })
+      if (!editor || !trimmed) return
+      const { pageIndex, point } = editor
+      // rect is arranged so embedText's baseline lands on the clicked point
+      await commitViaReload(async () => {
+        await placeText(
+          get().host!,
+          pageIndex,
+          trimmed,
+          { x: point.x, y: point.y, w: 0, h: FILL_FONT_SIZE },
+          FILL_FONT_SIZE,
+        )
+      }, `text placed on page ${pageIndex + 1}`)
+    },
+
     startPlacingComment() {
-      set({ commentPlacementActive: true, redactPlacementActive: false })
+      set({
+        commentPlacementActive: true,
+        redactPlacementActive: false,
+        highlightPlacementActive: false,
+        fillPlacementActive: false,
+        fillEditor: null,
+      })
     },
 
     cancelPlacingComment() {
@@ -674,7 +700,13 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     startRedaction() {
-      set({ redactPlacementActive: true, commentPlacementActive: false })
+      set({
+        redactPlacementActive: true,
+        commentPlacementActive: false,
+        highlightPlacementActive: false,
+        fillPlacementActive: false,
+        fillEditor: null,
+      })
     },
 
     cancelRedaction() {
@@ -683,10 +715,33 @@ export const useApp = create<AppState>((set, get) => {
 
     async redactRegionAction(pageIndex, rect) {
       await commitStructural(() => {
-        const { removedGlyphs } = redactRegion(get().host!, get().model!, pageIndex, rect)
-        return `redacted region on page ${pageIndex + 1} — ${removedGlyphs} character(s) removed, area covered`
+        const { removedGlyphs, bars } = redactRegion(get().host!, get().model!, pageIndex, rect)
+        return `redacted page ${pageIndex + 1} — ${removedGlyphs} character(s) removed, ${bars} bar(s) drawn`
       })
-      set({ redactPlacementActive: false })
+    },
+
+    startHighlight() {
+      set({
+        highlightPlacementActive: true,
+        redactPlacementActive: false,
+        commentPlacementActive: false,
+        fillPlacementActive: false,
+        fillEditor: null,
+      })
+    },
+
+    cancelHighlight() {
+      set({ highlightPlacementActive: false })
+    },
+
+    async highlightRegionAction(pageIndex, rect) {
+      await commitStructural(() => {
+        const { lines } = highlightRegion(get().host!, get().model!, pageIndex, rect)
+        // highlightRegion doesn't touch the page when it finds no text,
+        // so throwing here skips the save/history snapshot entirely
+        if (lines === 0) throw new Error('no text under the highlight')
+        return `highlighted ${lines} line(s) on page ${pageIndex + 1}`
+      })
     },
 
     openCommentEditor(paneId, pageIndex, point, existing) {
@@ -771,12 +826,7 @@ export const useApp = create<AppState>((set, get) => {
       if (!placement) return
       const { pageIndex, rect, pngBytes } = placement
       const ok = await commitViaReload(async () => {
-        if (placement.kind === 'text' && placement.text) {
-          const fontSize = Math.max(6, Math.min(72, rect.h * 0.7))
-          await placeText(get().host!, pageIndex, placement.text, rect, fontSize)
-        } else {
-          await placeImage(get().host!, pageIndex, pngBytes, rect)
-        }
+        await placeImage(get().host!, pageIndex, pngBytes, rect)
       }, `placed on page ${pageIndex + 1}`)
       if (ok) set({ placement: null })
     },

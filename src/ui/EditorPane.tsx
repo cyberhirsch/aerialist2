@@ -62,6 +62,8 @@ export function EditorPane({ paneId }: { paneId: string }) {
     history, historyIndex, searchMatches, searchIndex,
     commentPlacementActive, openCommentEditor,
     redactPlacementActive, redactRegionAction,
+    highlightPlacementActive, highlightRegionAction,
+    fillPlacementActive, fillEditor, openFillEditor, closeFillEditor, placeFillTextAction,
     startEdit, cancelEdit, applyEdit, undo, redo, exportPdf, setStatus, setPage,
     updatePaneView,
   } = useApp()
@@ -69,8 +71,9 @@ export function EditorPane({ paneId }: { paneId: string }) {
   const { pageIndex, zoom, fitMode, editMode } = view
   const [hovered, setHovered] = useState<Hit | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit | null } | null>(null)
-  /** In-progress redaction rubber-band, in CSS coords over the page. */
-  const [redactBox, setRedactBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  /** In-progress redact/highlight rubber-band, in CSS coords over the page. */
+  const [markBox, setMarkBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const markerActive = redactPlacementActive || highlightPlacementActive
   const currentMatchRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const lastPageFlipRef = useRef(0)
@@ -173,8 +176,8 @@ export function EditorPane({ paneId }: { paneId: string }) {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top }
   }, [])
 
-  /** Finish a redaction drag: map the CSS box to user space and apply. */
-  const finishRedaction = useCallback(
+  /** Finish a redact/highlight drag: map the CSS box to user space and apply. */
+  const finishMark = useCallback(
     (box: { x0: number; y0: number; x1: number; y1: number }) => {
       if (!pdfToCss) return
       const inv = invert(pdfToCss)
@@ -188,9 +191,13 @@ export function EditorPane({ paneId }: { paneId: string }) {
       }
       // ignore stray clicks / hairline drags
       if (rect.w < 2 || rect.h < 2) return
-      void redactRegionAction(pageIndex, rect)
+      if (redactPlacementActive) void redactRegionAction(pageIndex, rect)
+      else if (highlightPlacementActive) void highlightRegionAction(pageIndex, rect)
     },
-    [pdfToCss, pageIndex, redactRegionAction],
+    [
+      pdfToCss, pageIndex, redactPlacementActive, redactRegionAction,
+      highlightPlacementActive, highlightRegionAction,
+    ],
   )
 
   /**
@@ -201,7 +208,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
    */
   const onWheel = useCallback(
     (e: React.WheelEvent<HTMLDivElement>) => {
-      if (busy || placement || commentPlacementActive || redactPlacementActive) return
+      if (busy || placement || commentPlacementActive || markerActive || fillPlacementActive || fillEditor) return
       if (editing && editing.paneId === paneId) return
       const el = scrollRef.current
       if (!el || !model) return
@@ -224,7 +231,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
         el.scrollTop = Number.MAX_SAFE_INTEGER
       }
     },
-    [busy, placement, commentPlacementActive, redactPlacementActive, editing, paneId, model, pageIndex, setPage],
+    [busy, placement, commentPlacementActive, markerActive, fillPlacementActive, fillEditor, editing, paneId, model, pageIndex, setPage],
   )
 
   const setRsvpAnchor = useApp((s) => s.setRsvpAnchor)
@@ -362,34 +369,42 @@ export function EditorPane({ paneId }: { paneId: string }) {
       <div
         className={
           'relative mx-auto border border-ink-3' +
-          (commentPlacementActive || redactPlacementActive ? ' cursor-crosshair' : '')
+          (commentPlacementActive || markerActive ? ' cursor-crosshair' : '') +
+          (fillPlacementActive ? ' cursor-text' : '')
         }
         style={viewport ? { width: viewport.cssWidth, height: viewport.cssHeight } : undefined}
         onMouseDown={(e) => {
-          if (busy || !redactPlacementActive) return
+          if (busy || !markerActive) return
           const p = cssPoint(e)
-          setRedactBox({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
+          setMarkBox({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
         }}
         onMouseMove={(e) => {
-          if (redactBox) {
+          if (markBox) {
             const p = cssPoint(e)
-            setRedactBox((b) => (b ? { ...b, x1: p.x, y1: p.y } : b))
+            setMarkBox((b) => (b ? { ...b, x1: p.x, y1: p.y } : b))
             return
           }
-          if (!paneEditing && !commentPlacementActive && !redactPlacementActive) setHovered(hitTest(e))
+          if (!paneEditing && !commentPlacementActive && !markerActive && !fillPlacementActive) {
+            setHovered(hitTest(e))
+          }
         }}
         onMouseUp={() => {
-          if (!redactBox) return
-          const box = redactBox
-          setRedactBox(null)
-          finishRedaction(box)
+          if (!markBox) return
+          const box = markBox
+          setMarkBox(null)
+          finishMark(box)
         }}
         onMouseLeave={() => {
           setHovered(null)
-          setRedactBox(null)
+          setMarkBox(null)
         }}
         onClick={(e) => {
-          if (busy || redactPlacementActive) return
+          if (busy || markerActive) return
+          if (fillPlacementActive) {
+            const point = hitPoint(e)
+            if (point) openFillEditor(paneId, pageIndex, point)
+            return
+          }
           if (commentPlacementActive) {
             const point = hitPoint(e)
             if (point) openCommentEditor(paneId, pageIndex, point)
@@ -400,7 +415,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
         }}
         onContextMenu={(e) => {
           e.preventDefault()
-          if (commentPlacementActive || redactPlacementActive) return
+          if (commentPlacementActive || markerActive || fillPlacementActive) return
           setMenu({ x: e.clientX, y: e.clientY, hit: hitTest(e) })
         }}
       >
@@ -444,15 +459,30 @@ export function EditorPane({ paneId }: { paneId: string }) {
           </div>
         )}
 
-        {redactBox && (
+        {markBox && (
           <div
-            className="pointer-events-none absolute border border-ink-7 bg-ink-7/60"
+            className={
+              'pointer-events-none absolute ' +
+              (redactPlacementActive
+                ? 'border border-ink-7 bg-ink-7/60'
+                : 'border border-ink-5 bg-ink-6/25')
+            }
             style={{
-              left: Math.min(redactBox.x0, redactBox.x1),
-              top: Math.min(redactBox.y0, redactBox.y1),
-              width: Math.abs(redactBox.x1 - redactBox.x0),
-              height: Math.abs(redactBox.y1 - redactBox.y0),
+              left: Math.min(markBox.x0, markBox.x1),
+              top: Math.min(markBox.y0, markBox.y1),
+              width: Math.abs(markBox.x1 - markBox.x0),
+              height: Math.abs(markBox.y1 - markBox.y0),
             }}
+          />
+        )}
+
+        {fillEditor && fillEditor.paneId === paneId && fillEditor.pageIndex === pageIndex && pdfToCss && (
+          <FillTextEditor
+            key={`${fillEditor.point.x}:${fillEditor.point.y}`}
+            css={apply(pdfToCss, fillEditor.point.x, fillEditor.point.y)}
+            fontSize={12 * zoom}
+            onApply={(text) => void placeFillTextAction(text)}
+            onCancel={closeFillEditor}
           />
         )}
 
@@ -481,6 +511,58 @@ export function EditorPane({ paneId }: { paneId: string }) {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * Inline input for the fill tool: appears at the clicked spot, styled
+ * like document text (transparent, Helvetica), so what you type reads
+ * as if it's already on the paper. Enter commits it into the content
+ * stream at that position; escape/blur discards.
+ */
+function FillTextEditor({ css, fontSize, onApply, onCancel }: {
+  /** CSS position of the text baseline point ([x, y] from `apply`). */
+  css: [number, number]
+  fontSize: number
+  onApply: (text: string) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState('')
+  const ref = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    ref.current?.focus()
+  }, [])
+
+  return (
+    <input
+      ref={ref}
+      value={value}
+      spellCheck={false}
+      placeholder="type…"
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          onApply(value)
+        } else if (e.key === 'Escape') {
+          onCancel()
+        }
+      }}
+      onBlur={() => (value.trim() ? onApply(value) : onCancel())}
+      onClick={(e) => e.stopPropagation()}
+      className="absolute z-10 border-b border-dashed border-ink-5 bg-transparent px-0 text-black outline-none placeholder:text-ink-4"
+      style={{
+        left: css[0],
+        // the input's text baseline sits ~80% of the font size below its
+        // top edge — align that with the clicked baseline point
+        top: css[1] - fontSize * 0.8,
+        fontSize,
+        lineHeight: 1,
+        width: Math.max(160, value.length * fontSize * 0.62 + 24),
+        fontFamily: 'Helvetica, Arial, sans-serif',
+      }}
+    />
   )
 }
 

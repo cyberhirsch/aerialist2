@@ -58,21 +58,12 @@ export function SignaturePlacer({ paneId, pdfToCss }: { paneId: string; pdfToCss
         onClick={(e) => e.stopPropagation()}
         onContextMenu={(e) => e.stopPropagation()}
       >
-        {placement.kind === 'text' ? (
-          <div
-            className="h-full w-full overflow-hidden whitespace-pre-wrap break-words px-0.5 text-black select-none"
-            style={{ fontSize: css.height * 0.7, lineHeight: 1.2, fontFamily: 'Helvetica, Arial, sans-serif' }}
-          >
-            {placement.text}
-          </div>
-        ) : (
-          <img
-            src={placement.dataUrl}
-            alt="signature"
-            draggable={false}
-            className="h-full w-full select-none"
-          />
-        )}
+        <img
+          src={placement.dataUrl}
+          alt="signature"
+          draggable={false}
+          className="h-full w-full select-none"
+        />
         <div
           onPointerDown={startDrag('resize')}
           onClick={(e) => e.stopPropagation()}
@@ -92,7 +83,7 @@ export function SignaturePlacer({ paneId, pdfToCss }: { paneId: string; pdfToCss
           className="border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2 disabled:opacity-40"
           title="place"
         >
-          <Icon name={placement.kind === 'text' ? 'edit' : 'sign'} size={14} />
+          <Icon name="sign" size={14} />
         </button>
         <button
           onClick={cancelPlacement}
