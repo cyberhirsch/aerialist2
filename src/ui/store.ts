@@ -20,9 +20,17 @@ import {
 } from '../model/pageOps'
 import { setFormFieldValue } from '../model/formOps'
 import { findMatches, type SearchMatch } from '../model/search'
-import { placeImage } from '../model/signatureOps'
+import { placeImage, placeVectorStrokes } from '../model/signatureOps'
 import { placeText } from '../model/textOps'
 import { highlightRegion, redactRegion } from '../model/redactOps'
+import { traceImageToSvg } from './trace'
+import {
+  loadSvgSignatures,
+  MAX_SIGNATURES,
+  parseSignatureSvg,
+  saveSvgSignatures,
+  type SvgSignature,
+} from './svgSignatures'
 import type { PdfHost } from '../pdf/pdflibHost'
 import { Renderer } from '../pdf/pdfjsRender'
 import { transformJpegBytes } from './imageUtils'
@@ -92,6 +100,8 @@ export interface SignaturePlacement {
   dataUrl: string
   pngBytes: Uint8Array
   aspect: number
+  /** Present for traced s1..s10 stamps — placed as vector strokes. */
+  vector?: { svg: string }
 }
 
 /** An inline fill-text editor pinned to a spot on the page. */
@@ -193,6 +203,12 @@ interface AppState {
 
   signatureLibrary: SavedSignature[]
   signatureDialogOpen: boolean
+  /** The s1..s10 traced-SVG signature slots (sign pane). */
+  svgSignatures: SvgSignature[]
+  addSvgSignatureAction(dataUrl: string): Promise<void>
+  deleteSvgSignatureAction(index: number): void
+  /** Start placing slot `index`'s signature as a draggable ghost. */
+  beginSignatureStamp(index: number): void
   placement: SignaturePlacement | null
   openSignatureDialog(): void
   closeSignatureDialog(): void
@@ -467,6 +483,7 @@ export const useApp = create<AppState>((set, get) => {
 
     signatureLibrary: loadSignatureLibrary(),
     signatureDialogOpen: false,
+    svgSignatures: loadSvgSignatures(),
     placement: null,
     fillPlacementActive: false,
     fillEditor: null,
@@ -792,6 +809,63 @@ export const useApp = create<AppState>((set, get) => {
       set({ commentEditor: null })
     },
 
+    async addSvgSignatureAction(dataUrl) {
+      if (get().svgSignatures.length >= MAX_SIGNATURES) {
+        set({ status: `all ${MAX_SIGNATURES} signature slots are full — delete one first` })
+        return
+      }
+      set({ status: 'tracing centerline …' })
+      try {
+        const { svg, aspect, pathCount, bytes } = await traceImageToSvg(dataUrl)
+        set((s) => {
+          const list = [...s.svgSignatures, { svg, aspect }]
+          saveSvgSignatures(list)
+          return {
+            svgSignatures: list,
+            status: `s${list.length} traced — ${pathCount} stroke(s), ${formatBytes(bytes)}`,
+          }
+        })
+      } catch (err) {
+        set({ status: `trace error: ${(err as Error).message}` })
+      }
+    },
+
+    deleteSvgSignatureAction(index) {
+      set((s) => {
+        const list = s.svgSignatures.filter((_, i) => i !== index)
+        saveSvgSignatures(list)
+        return { svgSignatures: list, status: `signature s${index + 1} deleted` }
+      })
+    },
+
+    beginSignatureStamp(index) {
+      const sig = get().svgSignatures[index]
+      const editorId = get().targetEditorPaneId()
+      const { model } = get()
+      if (!sig || !editorId || !model) return
+      const pageIndex = get().paneView(editorId).pageIndex
+      const page = model.pages[pageIndex]
+      if (!page) return
+      const width = Math.min(180, page.width * 0.35)
+      const height = width / sig.aspect
+      set({
+        placement: {
+          paneId: editorId,
+          pageIndex,
+          rect: {
+            x: (page.width - width) / 2,
+            y: Math.max(40, page.height * 0.15),
+            w: width,
+            h: height,
+          },
+          dataUrl: 'data:image/svg+xml;utf8,' + encodeURIComponent(sig.svg),
+          pngBytes: new Uint8Array(0),
+          aspect: sig.aspect,
+          vector: { svg: sig.svg },
+        },
+      })
+    },
+
     beginPlacement(dataUrl, pngBytes, aspect) {
       const editorId = get().targetEditorPaneId()
       const { model } = get()
@@ -825,6 +899,23 @@ export const useApp = create<AppState>((set, get) => {
       const { placement } = get()
       if (!placement) return
       const { pageIndex, rect, pngBytes } = placement
+
+      if (placement.vector) {
+        // traced signature: stroke the centerlines straight into the
+        // content stream — vector ink, no raster, no reload needed
+        const strokes = parseSignatureSvg(placement.vector.svg)
+        if (!strokes) {
+          set({ placement: null, status: 'error: signature svg could not be parsed' })
+          return
+        }
+        await commitStructural(() => {
+          placeVectorStrokes(get().host!, get().model!, pageIndex, strokes, rect)
+          return `signature placed on page ${pageIndex + 1}`
+        })
+        set({ placement: null })
+        return
+      }
+
       const ok = await commitViaReload(async () => {
         await placeImage(get().host!, pageIndex, pngBytes, rect)
       }, `placed on page ${pageIndex + 1}`)

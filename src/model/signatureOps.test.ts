@@ -1,7 +1,7 @@
 import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 import { describe, expect, it } from 'vitest'
 import { loadDocumentModel } from './buildModel'
-import { placeImage } from './signatureOps'
+import { placeImage, placeVectorStrokes } from './signatureOps'
 
 // a well-known minimal 1x1 transparent PNG
 const TINY_PNG_BASE64 =
@@ -65,5 +65,43 @@ describe('placeImage (signatures/initials/date stamps)', () => {
     const saved = await host.save()
     const { model: reloaded } = await loadDocumentModel(saved)
     expect(wordsOn(reloaded, 0)).toEqual(['Please', 'sign', 'below'])
+  })
+})
+
+describe('placeVectorStrokes (traced s1..s10 signatures)', () => {
+  const strokes = {
+    // a V shape and a dot, in a 100×50 view box (y down)
+    paths: [
+      [[10, 10], [50, 40], [90, 10]],
+      [[95, 10], [95.01, 10]],
+    ] as [number, number][][],
+    viewW: 100,
+    viewH: 50,
+    strokeWidth: 3,
+  }
+
+  it('writes stroked paths into the content stream without touching text', async () => {
+    const { host, model } = await loadDocumentModel(await makePdf())
+    placeVectorStrokes(host, model, 0, strokes, { x: 100, y: 200, w: 200, h: 100 })
+
+    // the rebuilt in-place model keeps its text
+    expect(wordsOn(model, 0)).toEqual(['Please', 'sign', 'below'])
+
+    // strokes are real vector ops in page space: rect.x + 10*(200/100) = 120,
+    // rect.y + rect.h - 10*(100/50) = 280 for the first point
+    const content = new TextDecoder().decode(host.pageContentBytes(0))
+    expect(content).toContain('120 280 m')
+    expect(content).toContain(' S')
+    expect(content).toContain('1 J 1 j')
+  })
+
+  it('survives save + reload with text and strokes intact', async () => {
+    const { host, model } = await loadDocumentModel(await makePdf())
+    placeVectorStrokes(host, model, 0, strokes, { x: 100, y: 200, w: 200, h: 100 })
+
+    const { host: reloadedHost, model: reloaded } = await loadDocumentModel(await host.save())
+    expect(wordsOn(reloaded, 0)).toEqual(['Please', 'sign', 'below'])
+    const content = new TextDecoder().decode(reloadedHost.pageContentBytes(0))
+    expect(content).toContain('120 280 m')
   })
 })

@@ -4,6 +4,7 @@ import { EditorPane } from './EditorPane'
 import { Icon } from './icons'
 import { OrganizerPane } from './OrganizerPane'
 import { RsvpPane } from './RsvpPane'
+import { SignPane } from './SignPane'
 import { useApp, type EditMode } from './store'
 import { PANE_KINDS, type LayoutNode, type PaneKind, type PaneNode, type SplitNode } from './workspace'
 
@@ -91,11 +92,12 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
   const redactPlacementActive = useApp((s) => s.redactPlacementActive)
   const highlightPlacementActive = useApp((s) => s.highlightPlacementActive)
   const fillPlacementActive = useApp((s) => s.fillPlacementActive)
+  const svgSignatures = useApp((s) => s.svgSignatures)
   const {
     focusPane, splitPaneAction, closePaneAction, setPaneKindAction, layout,
     setEditMode, openSignatureDialog, startFillPlacement, cancelFillPlacement,
     startPlacingComment, startRedaction, cancelRedaction,
-    startHighlight, cancelHighlight, setFitMode, setPage, setZoom,
+    startHighlight, cancelHighlight, beginSignatureStamp, setFitMode, setPage, setZoom,
   } = useApp()
   const view = useApp((s) => s.paneViews[pane.id])
   const focused = focusedPaneId === pane.id
@@ -185,14 +187,27 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
               <Icon name="border-color" size={14} />
             </button>
             {fillPlacementActive && (
-              <button
-                onClick={openSignatureDialog}
-                disabled={!model || busy}
-                title="sign"
-                className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
-              >
-                <Icon name="sign" size={14} />
-              </button>
+              <>
+                <button
+                  onClick={openSignatureDialog}
+                  disabled={!model || busy}
+                  title="sign"
+                  className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
+                >
+                  <Icon name="sign" size={14} />
+                </button>
+                {svgSignatures.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => beginSignatureStamp(i)}
+                    disabled={!model || busy}
+                    title={`place signature s${i + 1}`}
+                    className="px-1 text-xs text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
+                  >
+                    s{i + 1}
+                  </button>
+                ))}
+              </>
             )}
 
             <button
@@ -340,6 +355,8 @@ function PaneBody({ pane }: { pane: PaneNode }) {
       return <EditorPane paneId={pane.id} />
     case 'pages':
       return <OrganizerPane paneId={pane.id} />
+    case 'sign':
+      return <SignPane />
     case 'rsvp':
       return <RsvpPane paneId={pane.id} />
   }

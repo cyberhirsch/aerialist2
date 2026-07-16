@@ -3,11 +3,12 @@
  * panes. Each pane has a kind (its "editor type") switchable at runtime.
  */
 
-export type PaneKind = 'editor' | 'pages' | 'rsvp'
+export type PaneKind = 'editor' | 'pages' | 'sign' | 'rsvp'
 
 export const PANE_KINDS: { kind: PaneKind; label: string }[] = [
   { kind: 'editor', label: 'editor' },
   { kind: 'pages', label: 'pages' },
+  { kind: 'sign', label: 'sign' },
   { kind: 'rsvp', label: 'rsvp' },
 ]
 
