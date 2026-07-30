@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react'
+import { filenameFromUrl, requestRedirectedPdfUrl } from './platform/chromeExtension'
 import { HelpOverlay } from './ui/HelpOverlay'
 import { SaveDialog } from './ui/SaveDialog'
 import { SignatureDialog } from './ui/SignatureDialog'
@@ -28,6 +29,24 @@ export default function App() {
       .then((buf) =>
         openFile(sample.split('/').pop() ?? 'sample.pdf', new Uint8Array(buf)),
       )
+  }, [openFile])
+
+  // extension only: this tab was redirected here in place of Chrome's
+  // built-in PDF viewer — ask the background script which PDF, then
+  // fetch and open it (host_permissions bypass normal CORS here)
+  useEffect(() => {
+    void requestRedirectedPdfUrl().then((url) => {
+      if (!url) return
+      void fetch(url)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status} ${r.statusText}`))))
+        .then((buf) => openFile(filenameFromUrl(url), new Uint8Array(buf)))
+        .catch((err: unknown) => {
+          useApp.getState().setStatus(
+            `couldn't load the PDF — ${(err as Error).message}. for local files, enable ` +
+              '"Allow access to file URLs" for this extension in chrome://extensions.',
+          )
+        })
+    })
   }, [openFile])
 
   useEffect(() => {

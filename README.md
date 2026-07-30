@@ -22,14 +22,30 @@ A Blender-style workspace: the layout is a tree of resizable panes, and each pan
 
 Split, close, or reassign any pane; the layout persists across reloads. Full undo/redo, keyboard shortcuts, and a right-click context menu throughout. Aesthetic is deliberately minimal: monospace, greyscale, no color accents, terminal-style chrome.
 
+## Chrome extension
+
+The same app, packaged as a Manifest V3 extension that replaces Chrome's built-in PDF viewer: navigate to any `.pdf` (local or remote) and it opens in Aerialist2 instead.
+
+```
+npm run build:extension   # builds dist-extension/
+```
+
+Then in Chrome: `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select `dist-extension/`.
+
+- The toolbar icon opens a fresh, empty editor tab.
+- `.pdf`-suffixed URLs redirect instantly via `declarativeNetRequest`; PDFs served without a `.pdf` suffix (common for download endpoints) are caught by a `Content-Type: application/pdf` check and redirected with a brief flash of the original response first — a real limitation of third-party extensions, which can't register as a true OS-level MIME handler the way Chrome's own bundled viewer can.
+- **Local `file://` PDFs need one manual step**: Chrome never lets an extension self-grant file access — after loading the extension, go to its card on `chrome://extensions`, click **Details**, and enable **Allow access to file URLs**.
+- The original PDF's URL is never put in a query string (many real PDF links contain their own `?`/`&`, e.g. signed S3 URLs, which would corrupt it) — the background service worker tracks it per-tab and hands it to the viewer over `chrome.runtime` messaging instead.
+
 ## Commands
 
 ```
 npm install
-npm run dev      # start the dev server
-npm run build    # typecheck (tsc -b) + production build
-npm run lint     # oxlint
-npx vitest run   # test suite
+npm run dev               # start the dev server
+npm run build             # typecheck (tsc -b) + production build (static site)
+npm run build:extension   # typecheck + build the Chrome extension
+npm run lint              # oxlint
+npx vitest run            # test suite
 ```
 
 ## Architecture
@@ -38,6 +54,8 @@ npx vitest run   # test suite
 - `src/model/` — the editable document model. The single API the UI talks to; wraps the engine and the pdf-lib host together.
 - `src/pdf/` — adapters over third-party libraries, kept behind the model: PDF.js for rendering, pdf-lib for document assembly (merge, split, rotate, page ops, save).
 - `src/ui/` — React components and the Zustand store, including the pane-workspace system.
+- `src/platform/chromeExtension.ts` — bridge to the extension shell (a no-op outside the extension).
+- `extension/` — Manifest V3 manifest + background service worker for the Chrome extension build.
 
 Full product spec: [docs/PRD.md](docs/PRD.md).
 
