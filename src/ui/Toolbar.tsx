@@ -7,7 +7,7 @@ export function Toolbar() {
   const {
     fileName, model, busy, history, historyIndex,
     searchQuery, searchCaseSensitive, searchWholeWord, searchMatches, searchIndex,
-    requestOpen, exportPdf, undo, redo,
+    requestOpen, exportPdf, printPdf, undo, redo,
     toggleHelp,
     setSearchQuery, setSearchCaseSensitive, setSearchWholeWord, searchNext, searchPrev, clearSearch,
   } = useApp()
@@ -124,6 +124,24 @@ export function Toolbar() {
         {fileName ?? '── no document ──'}
       </span>
 
+      <button
+        onClick={() => void printPdf()}
+        disabled={!model || busy}
+        title="print"
+        className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-7 disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <Icon name="print" size={14} />
+      </button>
+      <button
+        onClick={() => void exportPdf()}
+        disabled={!model || busy}
+        title="download"
+        className="px-1 text-ink-5 hover:bg-ink-2 hover:text-ink-7 disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <Icon name="export" size={14} />
+      </button>
+
+      <span className="text-ink-3">│</span>
       <button
         onClick={toggleHelp}
         title="help"

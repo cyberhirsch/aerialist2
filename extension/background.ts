@@ -66,10 +66,17 @@ chrome.runtime.onStartup.addListener(() => {
   void registerRedirectRule()
 })
 
-// record the pre-redirect URL for the DNR-handled (.pdf-suffix) path
+// record the pre-redirect URL for the DNR-handled (.pdf-suffix) path, and
+// redirect local file:// PDFs directly — DNR's regexFilter only matches
+// http(s):// requests, and there's no response header to inspect on a
+// file:// load, so neither of the other two mechanisms ever sees these
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0) return
-  if (PDF_SUFFIX.test(details.url)) pdfByTab.set(details.tabId, details.url)
+  if (!PDF_SUFFIX.test(details.url)) return
+  pdfByTab.set(details.tabId, details.url)
+  if (details.url.startsWith('file://')) {
+    void chrome.tabs.update(details.tabId, { url: chrome.runtime.getURL('index.html') })
+  }
 })
 
 // content-type fallback for PDFs served without a .pdf suffix

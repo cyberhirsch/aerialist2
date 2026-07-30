@@ -271,6 +271,7 @@ interface AppState {
   undo(): Promise<void>
   redo(): Promise<void>
   exportPdf(): Promise<void>
+  printPdf(): Promise<void>
   compressAction(): Promise<void>
   /** Re-encode embedded JPEGs at lower quality to shrink the file. */
   recompressImagesAction(): Promise<void>
@@ -1180,6 +1181,28 @@ export const useApp = create<AppState>((set, get) => {
         set((s) => ({ busy: false, exportedIndex: s.historyIndex, status: `exported ${filename}` }))
       } catch (err) {
         set({ busy: false, status: `export error: ${(err as Error).message}` })
+      }
+    },
+
+    async printPdf() {
+      const { host } = get()
+      if (!host) return
+      set({ busy: true, status: 'preparing print …' })
+      try {
+        const bytes = await host.save()
+        const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: 'application/pdf' })
+        const url = URL.createObjectURL(blob)
+        const win = window.open(url, '_blank')
+        if (!win) {
+          URL.revokeObjectURL(url)
+          set({ busy: false, status: 'print blocked — allow pop-ups for this site' })
+          return
+        }
+        win.addEventListener('load', () => win.print())
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+        set({ busy: false, status: 'opened print preview' })
+      } catch (err) {
+        set({ busy: false, status: `print error: ${(err as Error).message}` })
       }
     },
 
