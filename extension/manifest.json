@@ -23,7 +23,7 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["declarativeNetRequest", "webRequest", "webNavigation", "tabs", "storage"],
+  "permissions": ["declarativeNetRequest", "webRequest", "webNavigation", "tabs"],
   "host_permissions": ["http://*/*", "https://*/*", "file:///*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

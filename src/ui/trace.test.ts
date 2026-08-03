@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PathCommand } from '../model/signatureOps'
 import { parseSignatureSvg } from './svgSignatures'
-import { SVG_BYTE_LIMIT, traceMask } from './trace'
+import { applyStrokeEdit, SVG_BYTE_LIMIT, traceMask, type ChainSet } from './trace'
 
 /** Blank w×h mask with a painter callback. */
 function makeMask(w: number, h: number, paint: (set: (x: number, y: number) => void) => void): Uint8Array {
@@ -76,5 +76,74 @@ describe('traceMask (centerline tracing)', () => {
 
   it('throws when there is no ink', () => {
     expect(() => traceMask(new Uint8Array(100), 10, 10)).toThrow(/no ink/)
+  })
+})
+
+describe('applyStrokeEdit (manual split/connect)', () => {
+  const set = (chains: [number, number][][]): ChainSet => ({ chains, w: 100, h: 100, strokeWidth: 2 })
+
+  it('splits a stroke the drag line crosses', () => {
+    const horizontal = set([
+      [
+        [10, 50],
+        [90, 50],
+      ],
+    ])
+    // a short vertical cut through the middle of the horizontal stroke
+    const result = applyStrokeEdit(horizontal, [50, 30], [50, 70], 5)
+    expect(result.chains.length).toBe(2)
+    const xs = result.chains.map((c) => c.map(([x]) => x))
+    expect(Math.max(...xs[0])).toBeLessThanOrEqual(50)
+    expect(Math.min(...xs[1])).toBeGreaterThanOrEqual(50)
+  })
+
+  it('leaves strokes alone when the drag misses everything', () => {
+    const horizontal = set([
+      [
+        [10, 50],
+        [90, 50],
+      ],
+    ])
+    const result = applyStrokeEdit(horizontal, [10, 10], [90, 10], 5)
+    expect(result.chains.length).toBe(1)
+    expect(result).toBe(horizontal) // unchanged reference — no-op fast path
+  })
+
+  it('connects two different strokes at their nearest ends when the drag starts and lands on each', () => {
+    const twoStrokes = set([
+      [
+        [10, 10],
+        [40, 10],
+      ],
+      [
+        [60, 10],
+        [90, 10],
+      ],
+    ])
+    // drag from near the first stroke's right end to near the second's left end
+    const result = applyStrokeEdit(twoStrokes, [40, 11], [60, 9], 5)
+    expect(result.chains.length).toBe(1)
+    expect(result.chains[0]).toEqual([
+      [10, 10],
+      [40, 10],
+      [60, 10],
+      [90, 10],
+    ])
+  })
+
+  it('does not connect when the drag is not near two different strokes', () => {
+    const twoStrokes = set([
+      [
+        [10, 10],
+        [40, 10],
+      ],
+      [
+        [60, 10],
+        [90, 10],
+      ],
+    ])
+    // both drag ends land on the *same* stroke — should fall through to a (no-op) cut, not a merge
+    const result = applyStrokeEdit(twoStrokes, [10, 10], [40, 10], 5)
+    expect(result.chains.length).toBe(2)
   })
 })

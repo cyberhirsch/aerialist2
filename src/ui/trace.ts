@@ -11,6 +11,15 @@
  * simplification, retried with a coarser tolerance until the SVG fits
  * the byte budget (`chainSetToSvg`, cheap enough to re-run live as a UI
  * slider moves). All custom TS, no dependencies.
+ *
+ * A crossing — two strokes overlapping, or one stroke crossing itself —
+ * fundamentally can't be resolved from pixels alone: whichever stroke
+ * the walker reaches first consumes the shared pixels, so the other one
+ * dead-ends there. Untangling that reliably needs real stroke intent,
+ * which only the person who drew it has, so instead of guessing, the
+ * sign pane exposes it as a direct edit — see `applyStrokeEdit` below,
+ * wired up in SignPane's "fix crossings" tool: drag across a stroke to
+ * cut it, or drag between two strokes' ends to join them.
  */
 
 export const SVG_BYTE_LIMIT = 6 * 1024
@@ -569,4 +578,111 @@ export function traceMask(
   maxBytes = SVG_BYTE_LIMIT,
 ): TraceResult {
   return chainSetToSvg(skeletonToChains(mask, w, h), { maxBytes })
+}
+
+/* ── manual stroke editing (split / connect) ─────────────────── */
+
+/** Where, if anywhere, segment a–b crosses segment c–d. */
+function segmentIntersection(a: Point, b: Point, c: Point, d: Point): Point | null {
+  const r: Point = [b[0] - a[0], b[1] - a[1]]
+  const s: Point = [d[0] - c[0], d[1] - c[1]]
+  const denom = r[0] * s[1] - r[1] * s[0]
+  if (Math.abs(denom) < 1e-9) return null // parallel (or one is zero-length)
+  const acx = c[0] - a[0]
+  const acy = c[1] - a[1]
+  const t = (acx * s[1] - acy * s[0]) / denom
+  const u = (acx * r[1] - acy * r[0]) / denom
+  // strictly interior to both segments — a hit exactly at an endpoint
+  // (t or u at 0/1) would re-trigger on the very next pass over the
+  // piece it just split off, splitting off a zero-length sliver forever
+  const EPS = 1e-6
+  if (t < EPS || t > 1 - EPS || u < EPS || u > 1 - EPS) return null
+  return [a[0] + t * r[0], a[1] + t * r[1]]
+}
+
+/**
+ * Cut every chain the line `cutA`–`cutB` crosses, splitting each one into
+ * two chains at the crossing point. This is the manual counterpart to
+ * the auto-tracer's inability to tell "one stroke crossing another"
+ * from "one stroke that's actually two" — the person drawing knows,
+ * the algorithm can't, so this just lets them say so directly.
+ */
+export function splitChainSetAtCut(set: ChainSet, cutA: Point, cutB: Point): ChainSet {
+  const result: Point[][] = []
+  let changed = false
+  for (const chain of set.chains) {
+    let pieces = [chain]
+    // repeatedly scan every current piece for a crossing and split it,
+    // since the cut line can cross the same original chain more than once
+    for (;;) {
+      let didSplit = false
+      for (let pi = 0; pi < pieces.length && !didSplit; pi++) {
+        const piece = pieces[pi]
+        for (let i = 0; i < piece.length - 1; i++) {
+          const pt = segmentIntersection(piece[i], piece[i + 1], cutA, cutB)
+          if (!pt) continue
+          const before = [...piece.slice(0, i + 1), pt]
+          const after = [pt, ...piece.slice(i + 1)]
+          if (before.length < 2 || after.length < 2) continue
+          pieces = [...pieces.slice(0, pi), before, after, ...pieces.slice(pi + 1)]
+          didSplit = true
+          changed = true
+          break
+        }
+      }
+      if (!didSplit) break
+    }
+    result.push(...pieces)
+  }
+  return changed ? { ...set, chains: result } : set
+}
+
+/** A chain's endpoint, identified by which end (0 = start, 1 = end). */
+export interface ChainEnd {
+  chain: number
+  end: 0 | 1
+}
+
+/** The nearest chain endpoint to `pt`, within `maxDist`, or null. */
+export function nearestChainEnd(chains: Point[][], pt: Point, maxDist: number): ChainEnd | null {
+  let best: ChainEnd | null = null
+  let bestDist = maxDist
+  chains.forEach((chain, ci) => {
+    ;([0, 1] as const).forEach((end) => {
+      const p = end === 0 ? chain[0] : chain[chain.length - 1]
+      const d = Math.hypot(p[0] - pt[0], p[1] - pt[1])
+      if (d <= bestDist) {
+        bestDist = d
+        best = { chain: ci, end }
+      }
+    })
+  })
+  return best
+}
+
+/** Join two different chains end-to-end into one, bridging any gap with a straight segment. */
+export function connectChainSet(set: ChainSet, a: ChainEnd, b: ChainEnd): ChainSet {
+  if (a.chain === b.chain) return set
+  const chains = set.chains
+  // orient each so the join point lands at the seam: `ca` ends there, `cb` starts there
+  const ca = a.end === 1 ? chains[a.chain] : [...chains[a.chain]].reverse()
+  const cb = b.end === 0 ? chains[b.chain] : [...chains[b.chain]].reverse()
+  const merged = [...ca, ...cb]
+  const kept = chains.filter((_, i) => i !== a.chain && i !== b.chain)
+  return { ...set, chains: [...kept, merged] }
+}
+
+/**
+ * Auto-detect intent from a single drag gesture, per the sign pane's
+ * "fix crossings" tool: if the drag starts on one stroke's end and
+ * lands on a different stroke's end, join them; otherwise treat the
+ * whole drag as a cut and split whatever it crosses.
+ */
+export function applyStrokeEdit(set: ChainSet, dragStart: Point, dragEnd: Point, snapDist: number): ChainSet {
+  const startEnd = nearestChainEnd(set.chains, dragStart, snapDist)
+  const endEnd = nearestChainEnd(set.chains, dragEnd, snapDist)
+  if (startEnd && endEnd && startEnd.chain !== endEnd.chain) {
+    return connectChainSet(set, startEnd, endEnd)
+  }
+  return splitChainSetAtCut(set, dragStart, dragEnd)
 }

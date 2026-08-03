@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aerialist2 — Privacy Policy</title>
+<style>
+  :root {
+    --ink-0: #0c0c0c;
+    --ink-1: #161616;
+    --ink-2: #222222;
+    --ink-3: #3a3a3a;
+    --ink-4: #6e6e6e;
+    --ink-5: #a8a8a8;
+    --ink-6: #d4d4d4;
+    --ink-7: #f2f2f2;
+    --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, "SF Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ink-0);
+    color: var(--ink-6);
+    font-family: var(--font-mono);
+    line-height: 1.7;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+  h1 {
+    color: var(--ink-7);
+    font-size: 28px;
+    margin: 0 0 8px;
+  }
+  .updated {
+    color: var(--ink-4);
+    font-size: 13px;
+    margin-bottom: 40px;
+  }
+  h2 {
+    color: var(--ink-7);
+    font-size: 16px;
+    margin: 40px 0 12px;
+    border-bottom: 1px solid var(--ink-3);
+    padding-bottom: 8px;
+  }
+  p, li { color: var(--ink-6); font-size: 15px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 10px; }
+  code {
+    background: var(--ink-1);
+    border: 1px solid var(--ink-3);
+    padding: 1px 5px;
+    font-size: 13px;
+  }
+  a { color: var(--ink-6); }
+  .summary {
+    border: 1px solid var(--ink-3);
+    background: var(--ink-1);
+    padding: 18px 20px;
+    color: var(--ink-5);
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Aerialist2 — Privacy Policy</h1>
+  <div class="updated">Last updated: 2026-08-03</div>
+
+  <div class="summary">
+    Aerialist2 does not collect, transmit, or store any of your data anywhere.
+    Every PDF you open, edit, or sign stays entirely inside your own browser.
+  </div>
+
+  <h2>What this applies to</h2>
+  <p>
+    This policy covers both the web app at
+    <a href="https://cyberhirsch.github.io/aerialist2/">cyberhirsch.github.io/aerialist2</a>
+    and the "Aerialist2 — PDF Editor" Chrome extension, which is the same
+    application packaged a second way.
+  </p>
+
+  <h2>No data collection</h2>
+  <ul>
+    <li>No PDF content, filenames, or metadata are ever uploaded to a server — there is no backend at all.</li>
+    <li>No analytics, telemetry, tracking pixels, or crash reporting of any kind.</li>
+    <li>No accounts, no sign-in, no cookies used for identification.</li>
+    <li>No data is sold or shared with any third party, because none is collected in the first place.</li>
+  </ul>
+
+  <h2>What stays on your device</h2>
+  <p>
+    Signatures you draw or type, and your workspace layout, are saved using
+    your browser's local storage (<code>localStorage</code>) so they're there
+    the next time you open the app. This data never leaves your device and is
+    not accessible to us or anyone else. Clearing your browser's site data
+    for Aerialist2 removes it completely.
+  </p>
+
+  <h2>Chrome extension permissions</h2>
+  <p>The extension requests the minimum permissions needed to replace Chrome's built-in PDF viewer:</p>
+  <ul>
+    <li><code>declarativeNetRequest</code> — redirects <code>.pdf</code> page loads to the extension's own viewer instead of Chrome's built-in one.</li>
+    <li><code>webRequest</code> — read-only, used to detect PDFs served without a <code>.pdf</code> file extension (via the response's Content-Type header) so those redirect too.</li>
+    <li><code>webNavigation</code> — remembers which URL a tab was about to load, so the viewer knows which PDF to fetch after the redirect.</li>
+    <li><code>tabs</code> — updates a tab's URL to the viewer page, and opens a fresh tab from the toolbar icon.</li>
+    <li><code>host_permissions</code> (all sites, plus <code>file://</code>) — needed to fetch the PDF bytes from wherever it's hosted, and to read local files. Nothing is ever sent onward — the bytes are only read into the page to render and edit them.</li>
+  </ul>
+
+  <h2>Changes</h2>
+  <p>
+    If this policy ever changes, the "last updated" date above will change
+    with it. Given the app has no server and no accounts, we don't expect
+    much to change here.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions about this policy or the extension:
+    <a href="https://github.com/cyberhirsch/aerialist2/issues">open an issue on GitHub</a>.
+  </p>
+</main>
+</body>
+</html>

@@ -8,7 +8,7 @@ import {
 import { Icon } from './icons'
 import { useApp } from './store'
 import { MAX_SIGNATURES, type SignatureSlot } from './svgSignatures'
-import { chainSetToSvg, imageToChainSet, SVG_BYTE_LIMIT, type ChainSet } from './trace'
+import { applyStrokeEdit, chainSetToSvg, imageToChainSet, SVG_BYTE_LIMIT, type ChainSet } from './trace'
 
 type ComposeMode = 'import' | 'draw' | 'type' | null
 
@@ -55,8 +55,22 @@ export function SignPane() {
 
   // draw mode
   const [strokes, setStrokes] = useState<[number, number][][]>([])
-  const [liveStroke, setLiveStroke] = useState<[number, number][] | null>(null)
-  const drawSvgRef = useRef<SVGSVGElement>(null)
+  const drawBoxRef = useRef<HTMLDivElement>(null)
+  // the logical drawing canvas — DRAW_W×DRAW_H by default, but switches
+  // to match a loaded reference image's aspect ratio (see onPickTraceImage)
+  // so traced strokes line up with it; stays put after "done" removes
+  // the image, since the strokes already drawn are in that coordinate space
+  const [canvasSize, setCanvasSize] = useState({ w: DRAW_W, h: DRAW_H })
+
+  // draw mode: optional reference image shown faintly behind the strokes,
+  // to trace by hand — never itself part of the saved signature
+  const [traceImage, setTraceImage] = useState<string | null>(null)
+  const traceImageRef = useRef<HTMLInputElement>(null)
+
+  // stroke editing (both draw and import): crossing a stroke splits it,
+  // dragging from one stroke's end to another's joins them
+  const [editStrokes, setEditStrokes] = useState(false)
+  const editDragStart = useRef<[number, number] | null>(null)
 
   // type mode
   const [text, setText] = useState('')
@@ -76,13 +90,16 @@ export function SignPane() {
   const resetComposer = () => {
     setChainSet(null)
     setStrokes([])
-    setLiveStroke(null)
     drawingRef.current = false
     pointsRef.current = []
     setText('')
     setSmooth(0.4)
     setStrokeWidth(2.5)
     autoThicknessRef.current = true
+    setEditStrokes(false)
+    editDragStart.current = null
+    setTraceImage(null)
+    setCanvasSize({ w: DRAW_W, h: DRAW_H })
   }
 
   const startMode = (m: Exclude<ComposeMode, null>) => {
@@ -103,15 +120,18 @@ export function SignPane() {
 
   /* ── import ── */
 
-  const onPick = async (files: FileList | null) => {
-    const file = files?.[0]
-    if (!file) return
-    const dataUrl = await new Promise<string>((resolve, reject) => {
+  const readAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = () => resolve(reader.result as string)
       reader.onerror = () => reject(new Error('could not read file'))
       reader.readAsDataURL(file)
     })
+
+  const onPick = async (files: FileList | null) => {
+    const file = files?.[0]
+    if (!file) return
+    const dataUrl = await readAsDataUrl(file)
     setStatus('tracing centerline …')
     try {
       const cs = await imageToChainSet(dataUrl)
@@ -125,54 +145,112 @@ export function SignPane() {
 
   /* ── draw ── */
 
+  const onPickTraceImage = async (files: FileList | null) => {
+    const file = files?.[0]
+    if (!file) return
+    const dataUrl = await readAsDataUrl(file)
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error('could not read image'))
+      el.src = dataUrl
+    })
+    // match the box to the reference's aspect ratio so traced strokes line
+    // up with it — existing strokes are in the old coordinate space, so
+    // start the drawing over rather than leave them mis-scaled
+    const maxDim = 320
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight))
+    setCanvasSize({
+      w: Math.max(1, Math.round(img.naturalWidth * scale)),
+      h: Math.max(1, Math.round(img.naturalHeight * scale)),
+    })
+    setStrokes([])
+    setChainSet(null)
+    setTraceImage(dataUrl)
+  }
+
   // Drawing-in-progress state lives in refs, not React state: several
   // pointermove events can land in the same React 18 batch before a
-  // render commits, so a handler reading state (even via a closure
-  // check like `if (!liveStroke) return`) can see a stale value and
-  // silently drop points mid-stroke. Refs mutate synchronously and
-  // sidestep that entirely; `liveStroke` state exists only to paint
-  // the in-progress polyline.
+  // render commits, so a handler reading state can see a stale value
+  // and silently drop points mid-stroke. Refs mutate synchronously and
+  // sidestep that entirely. The box is displayed responsively (its
+  // rendered size can differ from the canvasSize logical viewBox), so
+  // pointer coordinates are rescaled to that fixed logical space.
   const drawingRef = useRef(false)
   const pointsRef = useRef<[number, number][]>([])
 
-  const svgPoint = (e: React.PointerEvent<SVGSVGElement>): [number, number] => {
-    const rect = drawSvgRef.current!.getBoundingClientRect()
-    return [e.clientX - rect.left, e.clientY - rect.top]
+  const boxPoint = (e: React.PointerEvent<HTMLDivElement>): [number, number] => {
+    const rect = drawBoxRef.current!.getBoundingClientRect()
+    return [
+      ((e.clientX - rect.left) * canvasSize.w) / rect.width,
+      ((e.clientY - rect.top) * canvasSize.h) / rect.height,
+    ]
   }
 
-  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     try {
-      drawSvgRef.current?.setPointerCapture(e.pointerId)
+      drawBoxRef.current?.setPointerCapture(e.pointerId)
     } catch {
       // synthetic/edge-case pointers can reject capture — drawing still works
     }
     drawingRef.current = true
-    pointsRef.current = [svgPoint(e)]
-    setLiveStroke(pointsRef.current)
+    pointsRef.current = [boxPoint(e)]
   }
-  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!drawingRef.current) return
-    pointsRef.current = [...pointsRef.current, svgPoint(e)]
-    setLiveStroke(pointsRef.current)
+    pointsRef.current = [...pointsRef.current, boxPoint(e)]
+    setChainSet({ chains: [...strokes, pointsRef.current], w: canvasSize.w, h: canvasSize.h, strokeWidth })
   }
   const onPointerUp = () => {
     if (!drawingRef.current) return
     drawingRef.current = false
     const pts = pointsRef.current
     pointsRef.current = []
-    setLiveStroke(null)
-    if (pts.length < 2) return
+    if (pts.length < 2) {
+      setChainSet(strokes.length ? { chains: strokes, w: canvasSize.w, h: canvasSize.h, strokeWidth } : null)
+      return
+    }
     setStrokes((s) => {
       const next = [...s, pts]
-      setChainSet({ chains: next, w: DRAW_W, h: DRAW_H, strokeWidth })
+      setChainSet({ chains: next, w: canvasSize.w, h: canvasSize.h, strokeWidth })
       return next
     })
+  }
+
+  /* ── stroke editing (split/connect) ── */
+
+  // uses the chain set's own logical size, unlike boxPoint above, since
+  // this applies equally to draw's canvasSize and an imported trace's
+  // native image dimensions
+  const editPoint = (e: React.PointerEvent<HTMLDivElement>): [number, number] => {
+    const rect = drawBoxRef.current!.getBoundingClientRect()
+    return [
+      ((e.clientX - rect.left) * chainSet!.w) / rect.width,
+      ((e.clientY - rect.top) * chainSet!.h) / rect.height,
+    ]
+  }
+
+  const onEditPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      drawBoxRef.current?.setPointerCapture(e.pointerId)
+    } catch {
+      // synthetic/edge-case pointers can reject capture
+    }
+    editDragStart.current = editPoint(e)
+  }
+  const onEditPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = editDragStart.current
+    editDragStart.current = null
+    if (!start || !chainSet) return
+    const end = editPoint(e)
+    const snap = Math.max(8, chainSet.strokeWidth * 3)
+    setChainSet(applyStrokeEdit(chainSet, start, end, snap))
   }
 
   const undoStroke = () => {
     setStrokes((s) => {
       const next = s.slice(0, -1)
-      setChainSet(next.length ? { chains: next, w: DRAW_W, h: DRAW_H, strokeWidth } : null)
+      setChainSet(next.length ? { chains: next, w: canvasSize.w, h: canvasSize.h, strokeWidth } : null)
       return next
     })
   }
@@ -273,64 +351,6 @@ export function SignPane() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
-        {mode === 'draw' && (
-          <div className="mb-3 flex flex-col gap-2">
-            <svg
-              ref={drawSvgRef}
-              viewBox={`0 0 ${DRAW_W} ${DRAW_H}`}
-              width={DRAW_W}
-              height={DRAW_H}
-              className="cursor-crosshair touch-none border border-ink-3 bg-white"
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onPointerUp}
-            >
-              {strokes.map((s, i) => (
-                <polyline
-                  key={i}
-                  points={s.map(([x, y]) => `${x},${y}`).join(' ')}
-                  fill="none"
-                  stroke="#000"
-                  strokeWidth={strokeWidth}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              ))}
-              {liveStroke && (
-                <polyline
-                  points={liveStroke.map(([x, y]) => `${x},${y}`).join(' ')}
-                  fill="none"
-                  stroke="#000"
-                  strokeWidth={strokeWidth}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              )}
-            </svg>
-            <div className="flex items-center gap-2 text-ink-4">
-              <span>draw with the mouse — this is the raw ink, before relax</span>
-              <span className="flex-1" />
-              <button
-                onClick={undoStroke}
-                disabled={strokes.length === 0}
-                title="undo last stroke"
-                className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
-              >
-                <Icon name="undo" size={14} />
-              </button>
-              <button
-                onClick={clearDrawing}
-                disabled={strokes.length === 0}
-                title="clear"
-                className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
-              >
-                <Icon name="delete" size={14} />
-              </button>
-            </div>
-          </div>
-        )}
-
         {mode === 'type' && (
           <div className="mb-3 flex flex-col gap-2">
             <div className="flex items-center gap-2">
@@ -362,8 +382,8 @@ export function SignPane() {
             {text.trim() && (
               <>
                 <div
-                  className="border border-ink-3 bg-white px-4 py-6 text-black"
-                  style={{ fontFamily: `"${font}"`, fontSize: '3.5rem', lineHeight: 1.2 }}
+                  className="overflow-x-auto border border-ink-3 bg-white px-6 py-12 text-black"
+                  style={{ fontFamily: `"${font}"`, fontSize: '7rem', lineHeight: 1.2, whiteSpace: 'nowrap' }}
                 >
                   {text}
                 </div>
@@ -397,68 +417,152 @@ export function SignPane() {
           <div className="mb-3 text-ink-4">choose an image file to trace…</div>
         )}
 
-        {chainSet && preview && (
+        {(mode === 'draw' || (chainSet && preview)) && (
           <div className="flex flex-col gap-2 border-t border-ink-3 pt-3">
             <div
-              className="border border-ink-3 bg-white p-2"
-              // our own tracer output only — never user-authored markup
-              dangerouslySetInnerHTML={{
-                __html: preview.svg.replace(
-                  '<svg ',
-                  '<svg style="display:block;width:100%;height:auto" ',
-                ),
-              }}
-            />
-            <label className="flex items-center gap-2 text-ink-4">
-              relax
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={smooth}
-                onChange={(e) => setSmooth(Number(e.target.value))}
-                className="flex-1"
-                title="smooths the curve — doesn't reduce points"
+              ref={drawBoxRef}
+              onPointerDown={editStrokes ? onEditPointerDown : mode === 'draw' ? onPointerDown : undefined}
+              onPointerMove={editStrokes ? undefined : mode === 'draw' ? onPointerMove : undefined}
+              onPointerUp={editStrokes ? onEditPointerUp : mode === 'draw' ? onPointerUp : undefined}
+              onPointerLeave={editStrokes ? onEditPointerUp : mode === 'draw' ? onPointerUp : undefined}
+              className={
+                'relative border border-ink-3 bg-white p-2 ' +
+                (editStrokes || mode === 'draw' ? 'cursor-crosshair touch-none' : '')
+              }
+              style={mode === 'draw' ? { aspectRatio: `${canvasSize.w} / ${canvasSize.h}` } : undefined}
+            >
+              {mode === 'draw' && traceImage && (
+                <img
+                  src={traceImage}
+                  alt=""
+                  draggable={false}
+                  onDragStart={(e) => e.preventDefault()}
+                  className="pointer-events-none absolute inset-0 h-full w-full object-contain opacity-40 select-none"
+                />
+              )}
+              <div
+                className={mode === 'draw' ? 'absolute inset-0' : undefined}
+                // our own tracer output only — never user-authored markup
+                dangerouslySetInnerHTML={
+                  preview
+                    ? {
+                        __html: preview.svg.replace(
+                          '<svg ',
+                          mode === 'draw'
+                            ? '<svg style="display:block;width:100%;height:100%" '
+                            : '<svg style="display:block;width:100%;height:auto" ',
+                        ),
+                      }
+                    : undefined
+                }
               />
-              <span className="w-8 text-right tabular-nums">{smooth.toFixed(2)}</span>
-            </label>
-            <label className="flex items-center gap-2 text-ink-4">
-              thickness
-              <select
-                value={strokeWidth}
-                onChange={(e) => setStrokeWidth(Number(e.target.value))}
-                className="border border-ink-3 bg-ink-0 px-1 text-ink-6 outline-none"
-              >
-                {THICKNESS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <span className="flex-1" />
-              <span className="tabular-nums">
-                {formatBytes(preview.bytes)} / {formatBytes(SVG_BYTE_LIMIT)}
-              </span>
-            </label>
-            <div className="flex gap-2">
-              <button
-                onClick={handleSaveTrace}
-                disabled={busy || slotsFull}
-                title={`save as s${sigs.length + 1}`}
-                className="flex items-center gap-1 border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2 disabled:opacity-40"
-              >
-                <Icon name="sign" size={14} />
-                save as s{sigs.length + 1}
-              </button>
-              <button
-                onClick={cancelCompose}
-                className="flex items-center gap-1 border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2"
-              >
-                <Icon name="close" size={14} />
-                cancel
-              </button>
             </div>
+            {mode === 'draw' && (
+              <div className="flex items-center gap-2 text-ink-4">
+                <span>sign directly with the mouse</span>
+                <span className="flex-1" />
+                {traceImage ? (
+                  <button
+                    onClick={() => setTraceImage(null)}
+                    title="done tracing — remove the reference image"
+                    className="flex items-center gap-1 px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6"
+                  >
+                    <Icon name="check" size={14} />
+                    done
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => traceImageRef.current?.click()}
+                    title="load an image to trace by hand"
+                    className="flex items-center gap-1 px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6"
+                  >
+                    <Icon name="upload-file" size={14} />
+                    load image
+                  </button>
+                )}
+                <button
+                  onClick={undoStroke}
+                  disabled={strokes.length === 0 || editStrokes}
+                  title="undo last stroke"
+                  className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
+                >
+                  <Icon name="undo" size={14} />
+                </button>
+                <button
+                  onClick={clearDrawing}
+                  disabled={strokes.length === 0 || editStrokes}
+                  title="clear"
+                  className="px-1 text-ink-4 hover:bg-ink-2 hover:text-ink-6 disabled:opacity-30"
+                >
+                  <Icon name="delete" size={14} />
+                </button>
+              </div>
+            )}
+            {chainSet && preview && (
+              <>
+                <button
+                  onClick={() => setEditStrokes((v) => !v)}
+                  title="fix crossings — drag across a stroke to cut it, drag between two strokes' ends to join them"
+                  className={
+                    'flex items-center gap-1 self-start px-1.5 py-0.5 text-ink-4 ' +
+                    (editStrokes ? 'bg-ink-2 text-ink-7' : 'hover:bg-ink-2 hover:text-ink-6')
+                  }
+                >
+                  <Icon name="link" size={14} />
+                  {editStrokes ? 'drag to cut/join strokes' : 'fix crossings'}
+                </button>
+                <label className="flex items-center gap-2 text-ink-4">
+                  relax
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={smooth}
+                    onChange={(e) => setSmooth(Number(e.target.value))}
+                    className="flex-1"
+                    title="smooths the curve — doesn't reduce points"
+                  />
+                  <span className="w-8 text-right tabular-nums">{smooth.toFixed(2)}</span>
+                </label>
+                <label className="flex items-center gap-2 text-ink-4">
+                  thickness
+                  <select
+                    value={strokeWidth}
+                    onChange={(e) => setStrokeWidth(Number(e.target.value))}
+                    className="border border-ink-3 bg-ink-0 px-1 text-ink-6 outline-none"
+                  >
+                    {THICKNESS_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="flex-1" />
+                  <span className="tabular-nums">
+                    {formatBytes(preview.bytes)} / {formatBytes(SVG_BYTE_LIMIT)}
+                  </span>
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSaveTrace}
+                    disabled={busy || slotsFull}
+                    title={`save as s${sigs.length + 1}`}
+                    className="flex items-center gap-1 border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2 disabled:opacity-40"
+                  >
+                    <Icon name="sign" size={14} />
+                    save as s{sigs.length + 1}
+                  </button>
+                  <button
+                    onClick={cancelCompose}
+                    className="flex items-center gap-1 border border-ink-3 bg-ink-1 px-2 py-0.5 text-ink-6 hover:bg-ink-2"
+                  >
+                    <Icon name="close" size={14} />
+                    cancel
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -499,6 +603,16 @@ export function SignPane() {
           e.target.value = ''
         }}
       />
+      <input
+        ref={traceImageRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          void onPickTraceImage(e.target.files)
+          e.target.value = ''
+        }}
+      />
     </div>
   )
 }
@@ -524,8 +638,8 @@ function SlotPreview({ slot, index, onDelete }: {
         />
       ) : (
         <div
-          className="border border-ink-3 bg-white px-4 py-6 text-black"
-          style={{ fontFamily: `"${slot.font}"`, fontSize: '3.5rem', lineHeight: 1.2 }}
+          className="overflow-x-auto border border-ink-3 bg-white px-6 py-12 text-black"
+          style={{ fontFamily: `"${slot.font}"`, fontSize: '7rem', lineHeight: 1.2, whiteSpace: 'nowrap' }}
         >
           {slot.text}
         </div>

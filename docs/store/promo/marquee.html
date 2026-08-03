@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --ink-0: #0c0c0c;
+    --ink-1: #161616;
+    --ink-2: #222222;
+    --ink-3: #3a3a3a;
+    --ink-4: #6e6e6e;
+    --ink-5: #a8a8a8;
+    --ink-6: #d4d4d4;
+    --ink-7: #f2f2f2;
+    --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, "SF Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1400px;
+    height: 560px;
+    background: var(--ink-0);
+    color: var(--ink-6);
+    font-family: var(--font-mono);
+    overflow: hidden;
+  }
+  .frame {
+    width: 1400px;
+    height: 560px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 90px;
+    border: 1px solid var(--ink-3);
+  }
+  .left {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+  .name {
+    font-size: 64px;
+    font-weight: 700;
+    color: var(--ink-7);
+    letter-spacing: -1px;
+  }
+  .name .two { color: var(--ink-4); }
+  .tagline {
+    font-size: 22px;
+    color: var(--ink-5);
+    line-height: 1.6;
+  }
+  .tagline b { color: var(--ink-6); font-weight: 700; }
+  .pills {
+    display: flex;
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .pill {
+    border: 1px solid var(--ink-3);
+    color: var(--ink-5);
+    font-size: 13px;
+    padding: 6px 12px;
+  }
+
+  /* mock editor window */
+  .mock {
+    width: 520px;
+    height: 360px;
+    border: 1px solid var(--ink-3);
+    background: var(--ink-1);
+    display: flex;
+    flex-direction: column;
+  }
+  .mock-bar {
+    height: 34px;
+    border-bottom: 1px solid var(--ink-3);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 8px;
+    color: var(--ink-5);
+    font-size: 13px;
+  }
+  .dot { width: 8px; height: 8px; border: 1px solid var(--ink-4); }
+  .mock-body {
+    flex: 1;
+    background: #fff;
+    margin: 18px;
+    padding: 28px 32px;
+    color: #111;
+    font-size: 15px;
+    line-height: 1.9;
+  }
+  .mock-body .title { font-size: 24px; font-weight: 700; margin-bottom: 14px; }
+  .edit-field {
+    display: inline-block;
+    background: #111;
+    color: #fff;
+    padding: 1px 4px;
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="left">
+      <div class="name">aerialist<span class="two">2</span></div>
+      <div class="tagline">
+        <b>True PDF text editing</b> — parses and rewrites<br>
+        the content stream, not an overlay.<br>
+        100% client-side. No uploads, no accounts.
+      </div>
+      <div class="pills">
+        <div class="pill">fill forms</div>
+        <div class="pill">merge / split</div>
+        <div class="pill">sign</div>
+        <div class="pill">works offline</div>
+      </div>
+    </div>
+    <div class="mock">
+      <div class="mock-bar">
+        <div class="dot"></div>
+        editor
+      </div>
+      <div class="mock-body">
+        <div class="title">INVOICE</div>
+        Bill to: <span class="edit-field">Contoso Ltd</span><br>
+        1 Roadrunner Way, Phoenix AZ<br><br>
+        Total due: 323.00
+      </div>
+    </div>
+  </div>
+</body>
+</html>
