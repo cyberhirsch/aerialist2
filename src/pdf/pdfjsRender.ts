@@ -10,6 +10,21 @@ GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString()
 
+/**
+ * PDF.js fetches these asset bundles by bare filename at runtime, from inside
+ * its own worker — so each must be absolute, or the worker resolves it against
+ * its own script location instead of the page's. Leaving one unset fails
+ * silently at render time: no wasm means JBIG2/JPEG2000 images can't be
+ * decoded (scanned PDFs come out blank), and no font data means glyphs the
+ * file doesn't embed render as placeholder boxes.
+ */
+const assetUrl = (dir: string) =>
+  new URL(`${import.meta.env.BASE_URL}${dir}/`, window.location.href).toString()
+
+const wasmUrl = assetUrl('pdfjs-wasm')
+const standardFontDataUrl = assetUrl('pdfjs-fonts')
+const cMapUrl = assetUrl('pdfjs-cmaps')
+
 export class Renderer {
   private doc: PDFDocumentProxy | null = null
   /** Serializes renders per page — PDF.js dislikes concurrent tasks on one page. */
@@ -22,7 +37,13 @@ export class Renderer {
       this.doc = null
     }
     this.queues.clear()
-    this.doc = await getDocument({ data: bytes.slice() }).promise
+    this.doc = await getDocument({
+      data: bytes.slice(),
+      wasmUrl,
+      standardFontDataUrl,
+      cMapUrl,
+      cMapPacked: true,
+    }).promise
   }
 
   get pageCount(): number {

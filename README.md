@@ -4,7 +4,8 @@ A browser-native PDF editor with **true text editing** — it parses and rewrite
 
 100% client-side. No backend, no uploads, no accounts. Everything runs in your browser and works offline after the first load.
 
-Live at: https://cyberhirsch.github.io/aerialist2/
+- Web app: https://cyberhirsch.github.io/aerialist2/
+- Chrome extension: [Chrome Web Store](https://chromewebstore.google.com/detail/eolpdeagjjcofgdnpjoohmolfpchggbo)
 
 ## What makes this different
 
@@ -15,16 +16,31 @@ Most browser-based PDF "editors" place a text box over the page and hope it look
 A Blender-style workspace: the layout is a tree of resizable panes, and each pane's function is switchable from its own header dropdown.
 
 - **editor** — click a word, line, table cell, or paragraph to edit it in place. Auto mode picks the right granularity: paragraphs reflow, tables edit per cell, everything else edits per line. AcroForm fields render as real, fillable native inputs positioned over the page. Cross-page find with highlighting lives in the toolbar.
-- **organizer** — a responsive thumbnail grid for the whole document. Drag to reorder pages, multi-select with ctrl/shift-click, right-click to duplicate/rotate/delete/extract/split, drop another PDF onto it to merge at that position.
+- **pages** — a responsive thumbnail grid for the whole document. Drag to reorder pages, multi-select with ctrl/shift-click, right-click to duplicate/rotate/delete/extract/split, drop another PDF onto it to merge at that position.
+- **sign** — a composer for signatures and initials: draw freehand, type (set in a real embedded font, never traced), or import a photo of a signature and trace it by hand over the reference image. Strokes can be split and reconnected, with smoothing and thickness controls, and saved to reusable slots.
 - **rsvp** — speed-reading pane fed directly from the extracted word stream, with an ORP-style pivot display.
 
-`[ sign ]` opens a dialog to draw, type, or upload a signature (or generate a date stamp), then drag/resize it before it's embedded into the page. Signatures and initials can be saved for reuse across documents.
+### Editor tools
+
+Each is a toggle in the editor pane's own header, so the page stays uncluttered when you aren't using them:
+
+- **fill** — click anywhere on the page and type; text lands in the content stream, not an overlay. Also the way to add text to a page that has none.
+- **comment** — click a spot to attach a sticky note.
+- **highlight** — drag over text like a marker; snaps to detected lines.
+- **redact** — drag over text and it is genuinely removed from the file (glyph bytes deleted from the content stream) and barred out, not just covered.
+- **zoom / fit** — preset zoom levels from a dropdown, plus fit-page and fit-width. Ctrl/cmd + scroll over the page zooms the document rather than the browser.
+
+The toolbar also carries print, download, and three size-reduction passes: repack the PDF's internal structure, re-encode embedded JPEGs at lower quality, or greyscale and flatten them.
 
 Split, close, or reassign any pane; the layout persists across reloads. Full undo/redo, keyboard shortcuts, and a right-click context menu throughout. Aesthetic is deliberately minimal: monospace, greyscale, no color accents, terminal-style chrome.
 
 ## Chrome extension
 
 The same app, packaged as a Manifest V3 extension that replaces Chrome's built-in PDF viewer: navigate to any `.pdf` (local or remote) and it opens in Aerialist2 instead.
+
+**Install:** [Chrome Web Store](https://chromewebstore.google.com/detail/eolpdeagjjcofgdnpjoohmolfpchggbo) (works in Chrome, Edge, Brave, and other Chromium browsers).
+
+To build it yourself instead:
 
 ```
 npm run build:extension   # builds dist-extension/
@@ -48,6 +64,9 @@ npm run lint              # oxlint
 npx vitest run            # test suite
 ```
 
+Drop PDFs into `testing pdfs/` (gitignored) and the dev server serves them at
+`/testing-pdfs/<name>.pdf`, so `?sample=/testing-pdfs/<name>.pdf` opens one directly.
+
 ## Architecture
 
 - `src/engine/` — the differentiator, all custom TypeScript: content stream lexer/parser, text-state interpreter, font/encoding/CMap decoding, word/line/block detection, layout (wrapping), content stream rewriter. No third-party PDF logic lives here.
@@ -57,7 +76,7 @@ npx vitest run            # test suite
 - `src/platform/chromeExtension.ts` — bridge to the extension shell (a no-op outside the extension).
 - `extension/` — Manifest V3 manifest + background service worker for the Chrome extension build.
 
-Full product spec: [docs/PRD.md](docs/PRD.md).
+Full product spec: [docs/PRD.md](docs/PRD.md). Phased work plan: [task.md](task.md). Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
@@ -78,16 +97,17 @@ Full product spec: [docs/PRD.md](docs/PRD.md).
 ### P1 — Core editing features
 
 - [x] Edit existing text
-- [x] Add text *(via edit; standalone text insertion still open)*
+- [x] Add text *(fill tool — click anywhere and type)*
 - [x] Delete text
 - [x] Font editing *(fallback-font substitution; style controls still open)*
 - [x] Images *(via signature/stamp placement; general insert-anywhere still open)*
 - [ ] Shapes
-- [ ] Highlight
+- [x] Highlight *(line-snapped marker)*
 - [ ] Underline
 - [ ] Drawing
-- [ ] Sticky notes
-- [x] Signatures *(draw/type/upload, save for reuse, initials, date stamp)*
+- [x] Sticky notes *(comment tool)*
+- [x] Redaction *(true content removal, not a black box on top)*
+- [x] Signatures *(draw/type/import-and-trace, save for reuse, initials, date stamp)*
 - [x] Fill forms
 - [x] Search
 - [x] Page reorder
@@ -103,7 +123,7 @@ Full product spec: [docs/PRD.md](docs/PRD.md).
 - [ ] Page numbers
 - [ ] Metadata editing
 - [ ] Password protection
-- [ ] Compression
+- [x] Compression *(structure repack + JPEG recompress/reduce)*
 - [ ] Backgrounds
 - [ ] Batch operations
 

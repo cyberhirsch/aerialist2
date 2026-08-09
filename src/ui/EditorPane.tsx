@@ -75,7 +75,11 @@ export function EditorPane({ paneId }: { paneId: string }) {
   const [markBox, setMarkBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const markerActive = redactPlacementActive || highlightPlacementActive
   const currentMatchRef = useRef<HTMLDivElement>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  // callback-ref + state: the scroll container mounts conditionally (only once
+  // a document exists), so mount-once effects would attach to nothing and
+  // never retry — which silently broke fit-mode resize tracking
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
   const lastPageFlipRef = useRef(0)
   const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null)
 
@@ -103,8 +107,26 @@ export function EditorPane({ paneId }: { paneId: string }) {
     currentMatchRef.current?.scrollIntoView({ block: 'center', inline: 'center' })
   }, [searchIndex, pageIndex])
 
+  // ctrl/cmd + wheel over the page zooms the document instead of the browser.
+  // Has to be a native listener registered non-passively: React's synthetic
+  // wheel handler can't reliably preventDefault the browser's zoom gesture.
   useEffect(() => {
-    const el = scrollRef.current
+    const el = scrollEl
+    if (!el) return
+    const onZoomWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const s = useApp.getState()
+      if (!s.model) return
+      // exponential so a fast flick and a slow trackpad drag both feel right
+      s.setZoom(paneId, s.paneView(paneId).zoom * Math.exp(-e.deltaY * 0.002))
+    }
+    el.addEventListener('wheel', onZoomWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onZoomWheel)
+  }, [paneId, scrollEl])
+
+  useEffect(() => {
+    const el = scrollEl
     if (!el) return
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0]
@@ -112,7 +134,7 @@ export function EditorPane({ paneId }: { paneId: string }) {
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [scrollEl])
 
   // recompute zoom to satisfy the active fit mode whenever the pane
   // resizes or the page's (rotation-adjusted) dimensions change.
@@ -208,6 +230,8 @@ export function EditorPane({ paneId }: { paneId: string }) {
    */
   const onWheel = useCallback(
     (e: React.WheelEvent<HTMLDivElement>) => {
+      // ctrl/cmd + wheel is a zoom gesture (handled natively below), not a page flip
+      if (e.ctrlKey || e.metaKey) return
       if (busy || placement || commentPlacementActive || markerActive || fillPlacementActive || fillEditor) return
       if (editing && editing.paneId === paneId) return
       const el = scrollRef.current
@@ -361,7 +385,10 @@ export function EditorPane({ paneId }: { paneId: string }) {
 
   return (
     <div
-      ref={scrollRef}
+      ref={(node) => {
+        scrollRef.current = node
+        setScrollEl(node)
+      }}
       className="h-full overflow-auto p-6"
       style={{ overflowAnchor: 'none' }}
       onWheel={onWheel}

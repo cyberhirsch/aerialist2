@@ -8,6 +8,8 @@ import { SignPane } from './SignPane'
 import { useApp, type EditMode } from './store'
 import { PANE_KINDS, type LayoutNode, type PaneKind, type PaneNode, type SplitNode } from './workspace'
 
+const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+
 const EDIT_MODES = ['auto', 'word', 'line', 'block'] as const
 const EDIT_MODE_LABEL: Record<EditMode, string> = { auto: 'auto', word: 'word', line: 'line', block: 'para' }
 const EDIT_MODE_TITLE: Record<EditMode, string> = {
@@ -304,9 +306,25 @@ function PaneFrame({ pane }: { pane: PaneNode }) {
               >
                 <Icon name="zoom-out" size={14} />
               </button>
-              <span className="w-11 text-center tabular-nums">
-                {model ? `${Math.round(zoom * 100)}%` : '–'}
-              </span>
+              <select
+                value={ZOOM_LEVELS.includes(zoom) ? String(zoom) : 'custom'}
+                onChange={(e) => {
+                  if (e.target.value === 'custom') return
+                  setZoom(pane.id, Number(e.target.value))
+                }}
+                disabled={navDisabled}
+                title="zoom level"
+                className="border-0 bg-ink-1 text-center tabular-nums text-ink-5 outline-none hover:bg-ink-2 disabled:opacity-40"
+              >
+                {!ZOOM_LEVELS.includes(zoom) && model && (
+                  <option value="custom">{Math.round(zoom * 100)}%</option>
+                )}
+                {ZOOM_LEVELS.map((z) => (
+                  <option key={z} value={z}>
+                    {Math.round(z * 100)}%
+                  </option>
+                ))}
+              </select>
               <button
                 onClick={() => setZoom(pane.id, zoom + 0.25)}
                 disabled={navDisabled}
