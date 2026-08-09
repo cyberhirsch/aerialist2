@@ -278,6 +278,14 @@ interface AppState {
   /** Desaturate + boost contrast on embedded JPEGs (also shrinks them). */
   reduceImagesAction(): Promise<void>
   toggleHelp(): void
+  /** Total words across the document; null while still being counted. */
+  wordCount: number | null
+  /**
+   * Walk the document counting words, one page per turn of the event loop.
+   * Parses each page as it goes (that's what makes the count possible), so
+   * it deliberately runs after first paint rather than before it.
+   */
+  indexWordCount(): Promise<void>
   setStatus(msg: string): void
 }
 
@@ -493,6 +501,7 @@ export const useApp = create<AppState>((set, get) => {
     fillEditor: null,
     commentPlacementActive: false,
     commentEditor: null,
+    wordCount: null,
     redactPlacementActive: false,
     highlightPlacementActive: false,
 
@@ -994,14 +1003,6 @@ export const useApp = create<AppState>((set, get) => {
       try {
         const { host, model } = await loadDocumentModel(bytes)
         await get().renderer.load(bytes)
-        const words = model.pages.reduce(
-          (n, p) =>
-            n + p.blocks.reduce(
-              (m, b) => m + b.lines.reduce((k, l) => k + l.words.length, 0),
-              0,
-            ),
-          0,
-        )
         const formFieldNames = new Set(
           model.pages.flatMap((p) => p.formFields.map((f) => f.name)),
         )
@@ -1025,7 +1026,8 @@ export const useApp = create<AppState>((set, get) => {
           selectedPages: new Set(),
           placement: null,
           signatureDialogOpen: false,
-          status: `${name} — ${model.pages.length} page(s), ${words} words detected.${formsNote} click a word to edit; ? for shortcuts.`,
+          wordCount: null,
+          status: `${name} — ${model.pages.length} page(s).${formsNote} click a word to edit; ? for shortcuts.`,
         }))
       } catch (err) {
         set({ busy: false, status: `error: ${(err as Error).message}` })
@@ -1322,6 +1324,29 @@ export const useApp = create<AppState>((set, get) => {
 
     clearSearch() {
       set({ searchQuery: '', searchMatches: [], searchIndex: -1 })
+    },
+
+    async indexWordCount() {
+      const model = get().model
+      if (!model) {
+        set({ wordCount: null })
+        return
+      }
+      const startRevision = get().revision
+      set({ wordCount: null })
+      let total = 0
+      for (const page of model.pages) {
+        // a new document (or an edit) supersedes this pass
+        if (get().model !== model || get().revision !== startRevision) return
+        for (const block of page.blocks) {
+          for (const line of block.lines) total += line.words.length
+        }
+        // yield so parsing a long document never locks up the UI
+        await new Promise((r) => setTimeout(r, 0))
+      }
+      if (get().model === model && get().revision === startRevision) {
+        set({ wordCount: total })
+      }
     },
 
     setStatus(msg) {

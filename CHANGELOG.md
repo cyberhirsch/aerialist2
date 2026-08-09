@@ -5,7 +5,32 @@ version numbers below track the Chrome extension.
 
 ## Unreleased
 
+### Changed — page parsing is now lazy
+
+Opening a document used to parse every page up front, synchronously, on the
+main thread. On a 38 MB drawing that blocked the UI for roughly 88 seconds
+before anything appeared, almost all of it work for pages nobody was looking
+at.
+
+Pages are now parsed on first use and cached. `buildPageModel` returns lazy
+accessors for `blocks`, `ops`, `fonts` and `contentBytes`; reading any of them
+decodes and analyses that page, and nothing else. Opening only reads page
+geometry.
+
+**The same file now opens in 345 ms with zero pages parsed** — parsing page 1
+costs ~9.7 s and is paid only if you actually touch that page's text.
+
+The two places that quietly read every page have been made incremental: the
+status bar's word count and the RSVP pane's feed now build one page per turn of
+the event loop, after first paint rather than before it.
+
 ### Fixed
+
+- **A deleted page could come back.** pdf-lib invalidates its internal page
+  cache in `insertPage` but not in `removePage`, so `getPage(i)` kept serving
+  the pre-delete pages. Harmless while every page was parsed on load; with
+  lazy parsing, a page opened after a delete resolved to its old neighbour.
+  `PdfHost.deletePage` now invalidates explicitly.
 
 - **Scanned PDFs rendered as blank pages.** PDF.js was never told where its WASM
   image decoders live, so every JBIG2 and JPEG2000 image failed with
@@ -47,12 +72,20 @@ version numbers below track the Chrome extension.
 
 ### Known issues
 
-- Very large vector documents are slow to open. Opening currently parses a file
-  three times over and walks every page synchronously on the main thread; a
-  38 MB CAD drawing blocks the UI for roughly 88 seconds before first paint.
-  Separately, page 1 of that file is 5.3 M drawing operators, ~13 s of which is
-  PDF.js building its display list before any rasterisation begins. Addressed by
-  phases 1–3 of [task.md](task.md).
+- Very large vector documents are still slow to *display*, even though they now
+  open quickly. Page 1 of the reference CAD drawing is 5.3 M drawing operators;
+  PDF.js spends ~13 s building its display list before rasterisation even
+  begins, and parsing that page's text for editing costs ~9.7 s on the main
+  thread. Phases 2 and 3 of [task.md](task.md) cover moving that work off the
+  main thread and degrading honestly when a page is beyond reach.
+
+## 0.1.2 — Chrome extension
+
+### Fixed
+
+- Added `'wasm-unsafe-eval'` to the extension's content security policy. MV3
+  blocks WebAssembly without it, so the bundled JBIG2 and JPEG2000 decoders
+  could not run and scanned PDFs fell back to the much slower pure-JS path.
 
 ## 0.1.1 — Chrome extension
 

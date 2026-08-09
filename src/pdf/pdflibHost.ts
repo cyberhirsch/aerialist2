@@ -106,6 +106,21 @@ export class PdfHost {
     return this.doc.getPageCount()
   }
 
+  /**
+   * Page box and rotation only. Cheap by design: `getPage` decodes and
+   * inflates the content streams, which is the expensive part — geometry is
+   * all the UI needs before anything is actually parsed.
+   */
+  pageGeometry(index: number): { width: number; height: number; rotation: number } {
+    const page = this.doc.getPage(index)
+    const { width, height } = page.getSize()
+    return {
+      width,
+      height,
+      rotation: ((page.getRotation().angle % 360) + 360) % 360,
+    }
+  }
+
   getPage(index: number): HostPage {
     const page = this.doc.getPage(index)
     const { width, height } = page.getSize()
@@ -180,6 +195,12 @@ export class PdfHost {
 
   deletePage(index: number): void {
     this.doc.removePage(index)
+    // pdf-lib invalidates its page cache in insertPage but not in removePage,
+    // so getPage() keeps serving the pages that were there before the delete.
+    // Harmless while every page was parsed up front; now that pages are read
+    // on demand, a page opened after a delete would get its old neighbour.
+    const cached = this.doc as unknown as { pageCache?: { invalidate?: () => void } }
+    cached.pageCache?.invalidate?.()
   }
 
   /** Duplicate a page in place; the copy lands right after the original. */

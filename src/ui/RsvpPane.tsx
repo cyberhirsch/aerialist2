@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Word } from '../model/document'
 import { defaultPaneView, useApp } from './store'
 
@@ -33,18 +33,36 @@ export function RsvpPane({ paneId }: { paneId: string }) {
   const view = useApp((s) => s.paneViews[paneId]) ?? defaultPaneView()
   const { wpm, playing, wordPos } = view
 
-  const feed: FeedWord[] = useMemo(() => {
-    // `revision` invalidates the memo: page ops mutate `model` in
-    // place, so the model reference alone would not.
-    void revision
-    if (!model) return []
-    return model.pages.flatMap((page, pageIndex) =>
-      page.blocks.flatMap((b) =>
-        b.lines.flatMap((l) =>
-          l.words.map((w) => ({ text: w.text, pageIndex, ref: w })),
-        ),
-      ),
-    )
+  // Built one page per turn of the event loop rather than in a memo: reading
+  // a page's words parses it, so doing the whole document synchronously here
+  // would undo the lazy loading and stall the UI on open. `revision` is a
+  // dependency because page ops mutate `model` in place, so the reference
+  // alone would not signal a change.
+  const [feed, setFeed] = useState<FeedWord[]>([])
+  useEffect(() => {
+    if (!model) {
+      setFeed([])
+      return
+    }
+    let cancelled = false
+    const acc: FeedWord[] = []
+    let pageIndex = 0
+    const step = () => {
+      if (cancelled || pageIndex >= model.pages.length) return
+      for (const b of model.pages[pageIndex].blocks) {
+        for (const l of b.lines) {
+          for (const w of l.words) acc.push({ text: w.text, pageIndex, ref: w })
+        }
+      }
+      pageIndex++
+      setFeed(acc.slice())
+      setTimeout(step, 0)
+    }
+    const first = setTimeout(step, 0)
+    return () => {
+      cancelled = true
+      clearTimeout(first)
+    }
   }, [model, revision])
 
   const pos = Math.min(wordPos, Math.max(0, feed.length - 1))
@@ -53,7 +71,7 @@ export function RsvpPane({ paneId }: { paneId: string }) {
   // jump to the word last clicked in an editor
   useEffect(() => {
     if (!rsvpAnchor) return
-    const idx = feed.findIndex((f) => f.ref === rsvpAnchor.word)
+    const idx = feed.findIndex((f: FeedWord) => f.ref === rsvpAnchor.word)
     if (idx >= 0) updatePaneView(paneId, { wordPos: idx })
   }, [rsvpAnchor, feed, paneId, updatePaneView])
 

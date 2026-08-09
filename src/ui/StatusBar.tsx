@@ -1,27 +1,21 @@
+import { useEffect } from 'react'
 import { formatBytes } from './format'
 import { Icon } from './icons'
 import { useApp } from './store'
 
-function countWords(model: ReturnType<typeof useApp.getState>['model']): number {
-  if (!model) return 0
-  let count = 0
-  for (const page of model.pages) {
-    for (const block of page.blocks) {
-      for (const line of block.lines) {
-        count += line.words.length
-      }
-    }
-  }
-  return count
-}
-
 export function StatusBar() {
   const {
-    status, busy, model, editing, history, historyIndex,
+    status, busy, model, editing, history, historyIndex, revision,
+    wordCount, indexWordCount,
     compressAction, recompressImagesAction, reduceImagesAction,
   } = useApp()
   const mode = busy ? 'WORKING' : editing ? 'EDIT' : model ? 'READY' : 'IDLE'
-  const wordCount = countWords(model)
+
+  // counting words means parsing every page, so it runs in the background
+  // after the document is on screen rather than blocking the way there
+  useEffect(() => {
+    void indexWordCount()
+  }, [model, revision, indexWordCount])
   const fileSize = history[historyIndex]?.byteLength ?? 0
 
   return (
@@ -30,7 +24,7 @@ export function StatusBar() {
       <span className="flex-1 truncate text-ink-5">{status}</span>
       {model && (
         <span className="flex items-center gap-2 text-ink-4 tabular-nums">
-          <span>{wordCount} words</span>
+          <span>{wordCount === null ? 'counting…' : `${wordCount} words`}</span>
           <span>·</span>
           <span>{formatBytes(fileSize)}</span>
           <button

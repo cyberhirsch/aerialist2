@@ -22,13 +22,15 @@ synchronously on the main thread**. On a 38 MB drawing that froze the UI for
 
 | # | Task | Model |
 | --- | --- | --- |
-| 1.1 | Make the engine parse lazy and per-page — drop the eager loop in `loadDocumentModel`, memoise `buildPageModel(host, i)` per page, materialise on first edit/search/hit-test | Opus 5 |
-| 1.2 | Separate *view* from *edit*: first paint should be pdf.js rendering page 1 only, with no engine work at all | Opus 5 |
+| 1.1 | ~~Make the engine parse lazy and per-page~~ **done** — `buildPageModel` returns lazy getters, memoised per page, resolved through the page's live index | Opus 5 |
+| 1.2 | ~~Separate *view* from *edit*~~ **done** — opening a document parses no pages; 38 MB drawing now opens in 345 ms (was ~88 s) | Opus 5 |
 | 1.3 | Defer `PdfHost.load` (pdf-lib) until a document operation actually needs it — merge, rotate, page ops, save | Opus 5 |
-| 1.4 | Make the RSVP pane pull its word stream in the background after first paint, never before it | Sonnet 5 |
+| 1.4 | ~~RSVP pulls its word stream in the background~~ **done** — feed builds one page per event-loop turn; the status bar word count does the same | Sonnet 5 |
 
-**Done when:** a 38 MB document shows page 1 in under a second, and the UI never
-blocks on parsing.
+**Status:** 1.1, 1.2 and 1.4 are done — opening the 38 MB reference drawing went
+from ~88 s of blocked UI to **345 ms**, with zero pages parsed up front. Parsing
+page 1 on demand still costs ~9.7 s on the main thread, which is what phase 2 is
+for. 1.3 remains.
 
 ## Phase 2 — Get heavy work off the main thread
 
@@ -66,9 +68,9 @@ parsing and timing can.
 
 | # | Task | Model |
 | --- | --- | --- |
-| 4.1 | Vitest coverage for the engine: content stream lexer/parser, glyph extraction, word/line/block detection | Sonnet 5 |
+| 4.1 | Vitest coverage for the engine — largely in place (11 files, 77 tests); extend to glyph extraction and block detection edge cases | Sonnet 5 |
 | 4.2 | Round-trip tests — edit, save, reload, assert the change survives | Opus 5 |
-| 4.3 | Performance regression harness: load fixtures headlessly via `pdfjs-dist/legacy`, assert parse time and block counts stay within budget | Sonnet 5 |
+| 4.3 | ~~Lazy-parse regression guards~~ **done** (`src/model/lazyParse.test.ts`) — still to add: timing budgets against fixtures | Sonnet 5 |
 | 4.4 | Fixture set of small, redistributable PDFs (scanned, CJK, forms, vector-heavy) | Haiku 4.5 |
 
 ## Phase 5 — Feature roadmap
@@ -88,5 +90,5 @@ Tracked in detail in [README.md](README.md#roadmap). Near-term candidates:
 
 | # | Task | Model |
 | --- | --- | --- |
-| 6.1 | Add `'wasm-unsafe-eval'` to the extension CSP so the WASM image decoders run instead of falling back to the slower pure-JS path | Haiku 4.5 |
+| 6.1 | ~~Add `'wasm-unsafe-eval'` to the extension CSP~~ **done** — shipped in 0.1.2 | Haiku 4.5 |
 | 6.2 | Store listing upkeep: screenshots, description, version bumps | Haiku 4.5 |

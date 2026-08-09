@@ -80,6 +80,12 @@ export interface PageModel {
   height: number
   /** Page /Rotate in degrees (0, 90, 180, 270). */
   rotation: number
+  /**
+   * Whether this page's content stream has been parsed yet. Reading any of
+   * the fields below forces it; this one never does, so callers that only
+   * want to report on work already done can ask without causing it.
+   */
+  readonly isParsed: boolean
   blocks: Block[]
   formFields: FormField[]
   /** Parsed operations of the (concatenated) content stream. */

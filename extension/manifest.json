@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Aerialist2 — PDF Editor",
   "short_name": "Aerialist2",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Open and edit PDFs directly in your browser — true content-stream text editing, 100% client-side, no uploads.",
   "icons": {
     "16": "icons/16.png",
@@ -23,9 +23,18 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["declarativeNetRequest", "webRequest", "webNavigation", "tabs"],
-  "host_permissions": ["http://*/*", "https://*/*", "file:///*"],
+  "permissions": [
+    "declarativeNetRequest",
+    "webRequest",
+    "webNavigation",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "file:///*"
+  ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }
 }
