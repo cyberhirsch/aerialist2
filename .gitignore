@@ -26,3 +26,5 @@ dist-ssr
 
 # local test PDFs (never committed)
 testing pdfs/
+
+_info/

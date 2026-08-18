@@ -92,3 +92,5 @@ Tracked in detail in [README.md](README.md#roadmap). Near-term candidates:
 | --- | --- | --- |
 | 6.1 | ~~Add `'wasm-unsafe-eval'` to the extension CSP~~ **done** — shipped in 0.1.2 | Haiku 4.5 |
 | 6.2 | Store listing upkeep: screenshots, description, version bumps | Haiku 4.5 |
+| 6.3 | ~~Automate Web Store submission~~ **done** — `scripts/publish-extension.mjs` builds, zips (pure Node, no external `zip`), uploads, and submits for review via the Publish API. Wired into `.github/workflows/publish-extension.yml` on an `extension-v*` tag or manual dispatch. One-time OAuth setup is documented in [docs/publishing-the-extension.md](docs/publishing-the-extension.md) — that part genuinely can't be automated. | Sonnet 5 |
+| 6.4 | Fix form-field overlay contrast — text/textarea/dropdown fields used the app's dark chrome colors, which read as redaction bars on a white page; checkboxes/radios rendered as solid blobs under the forced dark `color-scheme`. **done** | Sonnet 5 |

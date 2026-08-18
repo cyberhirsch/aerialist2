@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react'
 import type { FormField } from '../model/document'
 import { useApp } from './store'
 
+// Text/textarea/dropdown fields sit on document content, not app chrome — a
+// dark box here reads as a redaction bar on a white page. Inverted from the
+// app's own greyscale tokens (ink-7/ink-0) rather than introducing a new
+// color, so a filled-in field looks like paper, not app UI.
+const FIELD_CLASS =
+  'border border-ink-3 bg-ink-7 px-0.5 text-ink-0 outline-none focus:border-ink-5'
+
 /** One AcroForm field widget, rendered as a real interactive input. */
 export function FormFieldOverlay({ field, css, fontSize, pageIndex }: {
   field: FormField
@@ -29,6 +36,13 @@ export function FormFieldOverlay({ field, css, fontSize, pageIndex }: {
     fontSize,
   }
 
+  // The app forces a dark UA color-scheme globally (index.html), which an
+  // unstyled native checkbox/radio inherits — against a white PDF page that
+  // renders as a solid dark blob with no visible box or checkmark. These sit
+  // on document content, not app chrome, so they render with the light
+  // scheme regardless of the app's own theme.
+  const controlStyle: React.CSSProperties = { ...style, colorScheme: 'light' }
+
   if (field.kind === 'checkbox') {
     return (
       <input
@@ -38,7 +52,7 @@ export function FormFieldOverlay({ field, css, fontSize, pageIndex }: {
         onClick={stop}
         onContextMenu={stop}
         onChange={(e) => void setFormFieldAction(pageIndex, field.name, e.target.checked)}
-        style={style}
+        style={controlStyle}
         title={field.name}
       />
     )
@@ -54,7 +68,7 @@ export function FormFieldOverlay({ field, css, fontSize, pageIndex }: {
         onClick={stop}
         onContextMenu={stop}
         onChange={() => void setFormFieldAction(pageIndex, field.name, field.optionValue ?? '')}
-        style={style}
+        style={controlStyle}
         title={field.name}
       />
     )
@@ -71,7 +85,7 @@ export function FormFieldOverlay({ field, css, fontSize, pageIndex }: {
           setValue(e.target.value)
           void setFormFieldAction(pageIndex, field.name, e.target.value)
         }}
-        className="border border-ink-4 bg-ink-0 text-ink-7 outline-none focus:border-ink-6"
+        className={FIELD_CLASS}
         style={style}
         title={field.name}
       >
@@ -99,8 +113,7 @@ export function FormFieldOverlay({ field, css, fontSize, pageIndex }: {
     onBlur: () => {
       if (value !== field.value) void setFormFieldAction(pageIndex, field.name, value)
     },
-    className:
-      'border border-ink-4 bg-ink-0 px-0.5 text-ink-7 outline-none focus:border-ink-6',
+    className: FIELD_CLASS,
     title: field.name,
   }
 

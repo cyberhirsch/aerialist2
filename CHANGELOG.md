@@ -5,6 +5,29 @@ version numbers below track the Chrome extension.
 
 ## Unreleased
 
+### Added
+
+- **Automated Chrome Web Store publishing.** `scripts/publish-extension.mjs`
+  builds, zips (a small pure-Node zip writer — no external `zip` binary, so it
+  works the same on Windows/macOS/Linux/CI), uploads, and submits the
+  extension for review via Google's Publish API. Wired into
+  [`.github/workflows/publish-extension.yml`](.github/workflows/publish-extension.yml),
+  triggered by pushing a tag like `extension-v0.1.2` or manual dispatch.
+  One-time OAuth setup is documented in
+  [docs/publishing-the-extension.md](docs/publishing-the-extension.md).
+
+### Fixed
+
+- **Form field overlays were unreadable.** Text/textarea/dropdown fields used
+  the app's own dark chrome colors (`bg-ink-0` / `text-ink-7`), which on a
+  white PDF page reads exactly like a redaction bar — alarming on a form
+  you're trying to fill in. They now render as light fields with dark text,
+  inverted from the app's existing greyscale tokens rather than introducing a
+  new color. Checkboxes and radios had no styling at all and inherited the
+  app's global `color-scheme: dark`, which renders an unstyled control as a
+  solid blob with no visible box; they're now forced to `color-scheme: light`
+  since they sit on document content, not app chrome.
+
 ### Changed — page parsing is now lazy
 
 Opening a document used to parse every page up front, synchronously, on the

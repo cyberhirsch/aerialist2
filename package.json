@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:extension": "tsc -b && node scripts/build-extension.mjs",
+    "publish:extension": "node scripts/publish-extension.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },
